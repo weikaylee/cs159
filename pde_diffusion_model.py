@@ -406,8 +406,8 @@ class PDEScoreUNet(nn.Module):
         in_ch = ch
         for i, out_ch in enumerate(chs):
             blocks = nn.ModuleList([
-                ResBlock(in_ch, out_ch, cond_dim)
-                for _ in range(cfg.num_res_blocks)
+                ResBlock(in_ch if j == 0 else out_ch, out_ch, cond_dim)
+                for j in range(cfg.num_res_blocks)
             ])
             attn = SelfAttention2D(out_ch) if (cfg.H >> i) in cfg.attention_res else nn.Identity()
             self.enc_blocks.append(nn.ModuleList([blocks, attn]))
@@ -426,8 +426,8 @@ class PDEScoreUNet(nn.Module):
         for i, out_ch in enumerate(reversed(chs)):
             skip_ch = chs[-(i + 1)]
             blocks = nn.ModuleList([
-                ResBlock(in_ch + skip_ch, out_ch, cond_dim)
-                for _ in range(cfg.num_res_blocks)
+                ResBlock(in_ch + skip_ch if j == 0 else out_ch, out_ch, cond_dim)
+                for j in range(cfg.num_res_blocks)
             ])
             attn = SelfAttention2D(out_ch) if (cfg.H >> (len(chs) - 1 - i)) in cfg.attention_res else nn.Identity()
             self.dec_blocks.append(nn.ModuleList([blocks, attn]))
@@ -515,7 +515,7 @@ def maxwell_residual_loss(x0_hat: torch.Tensor, eps: float, mu: float) -> torch.
 
 def divergence_penalty(x0_hat: torch.Tensor) -> torch.Tensor:
     """Enforce ∇·u = 0 (incompressibility)."""
-    return (_ddx(x0_hat[:, 0]) + _ddy(x0_hat[:, 1]))**2 .mean()
+    return ((_ddx(x0_hat[:, 0]) + _ddy(x0_hat[:, 1]))**2).mean()
 
 
 # ─────────────────────────────────────────────
