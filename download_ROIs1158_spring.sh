@@ -7,9 +7,7 @@
 set -euo pipefail
 
 DEST="${1:-./SEN12MS-CR}"
-FTP_USER="m1554803"
-FTP_PASS="m1554803"
-BASE_URL="ftp://${FTP_USER}:${FTP_PASS}@dataserv.ub.tum.de"
+BASE_URL="https://dataserv.ub.tum.de/s/m1554803/download?path=/&files="
 
 # Archives to download for ROIs1158_spring
 # s2       = cloudy Sentinel-2 (13 bands)        — the model input
@@ -40,7 +38,7 @@ for archive in "${ARCHIVES[@]}"; do
         --tries=5 \
         --waitretry=10 \
         --progress=bar:force \
-        "${BASE_URL}/${archive}" \
+        "${BASE_URL}${archive}" \
         -O "$archive"
 
     echo ">> Extracting $archive ..."
