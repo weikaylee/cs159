@@ -1,0 +1,53 @@
+# lol prolly dont need this file, since we're not making a package? ignore for now
+
+# pyproject.toml — Python project metadata + tool config for the CS159
+# spectrally-consistent cloud-removal project.
+#
+# Quick install (pip only, no conda; macOS- and Linux-friendly for Phase 1):
+#     pip install .                 # production deps
+#     pip install '.[test]'         # production deps + pytest for the smoke test
+#
+# After install:
+#     python tests/integration/test_train_mirror_map.py    # smoke test (~30 s CPU)
+#     pytest tests/                                        # if [test] extra installed
+#     cd phase1_mirror_map && python train_mirror_map.py --data_root ... --output_dir ...
+#
+# Two README packages are deliberately NOT in `dependencies` below:
+#   - flash_attn==2.5.9.post1            needs MAX_JOBS=4 + --no-build-isolation
+#   - natten==0.17.1+torch220cu121       needs --find-links + Linux + CUDA 12.1
+# Both are used only by the (forthcoming) Phase 2 EMRDM track. For the full
+# CUDA environment, use env.yml + the post-create flash_attn step.
+
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cs159-cloud-removal"
+version = "0.0.1"
+description = "Spectrally consistent cloud removal via neural approximate mirror maps (CS159 project)"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "torch==2.2.1",
+    "torchaudio==2.2.1",
+    "torchvision==0.17.1",
+    "numpy==1.26.4",
+    "pytorch-lightning==2.3.0",
+    "wandb",
+    "omegaconf",
+    "rasterio",
+    "tifffile",
+    "scipy",
+    "opencv-python",
+    "lpips",
+]
+
+[project.optional-dependencies]
+test = ["pytest"]
+
+[tool.setuptools]
+packages = []
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

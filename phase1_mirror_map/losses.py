@@ -150,6 +150,49 @@ class ConstraintLoss(nn.Module):
         return recon + dis + self.style_weight * style
 
 
+# ── Reconstruction-quality metrics ─────────────────────────────────────────────
+
+def spectral_angle_mapper(x_hat: torch.Tensor,
+                          x_ref: torch.Tensor,
+                          eps: float = 1e-8) -> torch.Tensor:
+    """Mean spectral angle (radians) between x_hat and x_ref across pixels.
+
+    Args:
+        x_hat, x_ref: (B, C, H, W) reflectance tensors.
+    Returns:
+        Scalar tensor: mean of arccos of per-pixel cosine similarity
+        along the channel axis. Lower = more spectrally consistent.
+    """
+    dot = (x_hat * x_ref).sum(dim=1)
+    nx = x_hat.norm(dim=1).clamp(min=eps)
+    ny = x_ref.norm(dim=1).clamp(min=eps)
+    cos = (dot / (nx * ny)).clamp(-1.0, 1.0)
+    return torch.acos(cos).mean()
+
+
+def reconstruction_metrics(x_hat: torch.Tensor,
+                           x_ref: torch.Tensor,
+                           data_range: float = 1.0) -> dict:
+    """MAE / SAM (rad) / PSNR (dB) / SSIM for x_hat vs x_ref.
+
+    x_hat is clamped to [0, data_range] before PSNR/SSIM so the
+    InverseMap residual connection's tail values don't blow up the
+    metric.
+    """
+    from torchmetrics.functional.image import (
+        peak_signal_noise_ratio,
+        structural_similarity_index_measure,
+    )
+    x_clipped = x_hat.clamp(0.0, data_range)
+    return {
+        'mae':  F.l1_loss(x_clipped, x_ref),
+        'sam':  spectral_angle_mapper(x_clipped, x_ref),
+        'psnr': peak_signal_noise_ratio(x_clipped, x_ref, data_range=data_range),
+        'ssim': structural_similarity_index_measure(x_clipped, x_ref,
+                                                   data_range=data_range),
+    }
+
+
 # ── Full NAMM objective ─────────────────────────────────────────────────────────
 
 def namm_loss(g_phi: nn.Module,
@@ -181,7 +224,11 @@ def namm_loss(g_phi: nn.Module,
         device:            Torch device.
 
     Returns:
-        Dict with keys: loss, l_cycle, l_constr, l_reg
+        Dict with keys: loss, l_cycle, l_constr, l_reg, x_recon
+        where x_recon = f_psi(g_phi(x)) is the cycle reconstruction
+        (detached) — used by reconstruction_metrics() in the training
+        loop to compute MAE / SAM / PSNR / SSIM without a second
+        forward pass.
     """
     B = x.shape[0]
     if device is None:
@@ -222,4 +269,5 @@ def namm_loss(g_phi: nn.Module,
         'l_cycle':  l_cyc.detach(),
         'l_constr': l_c.detach(),
         'l_reg':    l_r.detach(),
+        'x_recon':  x_fwdbwd.detach(),
     }

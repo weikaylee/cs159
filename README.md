@@ -56,6 +56,21 @@ cd EMRDM
 
 Follow the EMRDM setup instructions, which install PyTorch 2.2.1, flash-attn, natten, and pytorch-lightning. All Phase 1 dependencies are included in that environment.
 
+**Quick install — conda (Linux + CUDA 12.1):**
+```bash
+conda env create -f env.yml
+conda activate emrdm
+# Final manual step — needed only for EMRDM Phase 2:
+MAX_JOBS=4 pip install flash_attn==2.5.9.post1 --no-build-isolation
+```
+
+**Quick install — pip only (Phase 1 dev, macOS- or Linux-friendly):**
+```bash
+pip install '.[test]'
+```
+Skips `flash_attn` and `natten` (CUDA-only, Phase 2 only). Includes `pytest` for the smoke test.
+
+**Manual install** (what `env.yml` encodes — useful for troubleshooting):
 ```bash
 conda create --name emrdm python=3.10
 conda activate emrdm
