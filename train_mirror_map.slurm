@@ -20,7 +20,7 @@
 
 # ── Environment ──────────────────────────────────────────────────────────────
 source ~/.bashrc
-conda activate emrdm    # re-use the EMRDM env: torch, rasterio, torchvision
+conda activate namm    # re-use the EMRDM env: torch, rasterio, torchvision
 
 # ── Paths ────────────────────────────────────────────────────────────────────
 DATA_ROOT="/resnick/groups/perona/oywang/cs159"
