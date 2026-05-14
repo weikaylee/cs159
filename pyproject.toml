@@ -51,3 +51,7 @@ packages = []
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+filterwarnings = [
+    # wandb's analytics module uses deprecated sentry-sdk APIs; not our bug.
+    "ignore::DeprecationWarning:wandb.analytics.sentry",
+]
