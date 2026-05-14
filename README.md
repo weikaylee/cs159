@@ -23,14 +23,22 @@ where `L_recon` is pixel-wise MSE, `L_dis` is an RKHS distribution loss over VGG
 ```
 .
 ├── README.md
+├── CLAUDE.md
 ├── download_ROIs1158_spring.sh       # Download script for the starter dataset
-└── phase1_mirror_map/
-    ├── icnn.py                       # Input-convex NN: forward mirror map g_phi
-    ├── inverse_map.py                # ResNet decoder: inverse mirror map f_psi
-    ├── losses.py                     # l_constr and full NAMM training objective
-    ├── dataset.py                    # SEN12MS-CR cloud-free dataloader
-    ├── train_mirror_map.py           # Phase 1 training script
-    └── train_mirror_map.slurm        # SLURM job submission script
+├── phase1_mirror_map/                # Phase 1: train NAMM mirror maps
+│   ├── icnn.py                       # Input-convex NN: forward mirror map g_phi
+│   ├── inverse_map.py                # ResNet decoder: inverse mirror map f_psi
+│   ├── losses.py                     # l_constr and full NAMM training objective
+│   ├── dataset.py                    # SEN12MS-CR cloud-free dataloader
+│   ├── train_mirror_map.py           # Phase 1 training script
+│   └── train_mirror_map.slurm        # SLURM job submission script
+├── phase2_emrdm/                     # Phase 2: train EMRDM in mirror space (forthcoming)
+├── phase3_finetune/                  # Phase 3: finetune inverse map (forthcoming)
+├── utils/                            # shared code (empty for now)
+├── tests/
+│   ├── unit/{phase1,phase2,phase3}/
+│   └── integration/
+└── dump/                             # parked/exploratory code outside the documented pipeline
 ```
 
 Phase 2 (EMRDM training in mirror space) and Phase 3 (inverse map finetuning) scripts are forthcoming.
@@ -48,6 +56,21 @@ cd EMRDM
 
 Follow the EMRDM setup instructions, which install PyTorch 2.2.1, flash-attn, natten, and pytorch-lightning. All Phase 1 dependencies are included in that environment.
 
+**Quick install — conda (Linux + CUDA 12.1):**
+```bash
+conda env create -f env.yml
+conda activate emrdm
+# Final manual step — needed only for EMRDM Phase 2:
+MAX_JOBS=4 pip install flash_attn==2.5.9.post1 --no-build-isolation
+```
+
+**Quick install — pip only (Phase 1 dev, macOS- or Linux-friendly):**
+```bash
+pip install '.[test]'
+```
+Skips `flash_attn` and `natten` (CUDA-only, Phase 2 only). Includes `pytest` for the smoke test.
+
+**Manual install** (what `env.yml` encodes — useful for troubleshooting):
 ```bash
 conda create --name emrdm python=3.10
 conda activate emrdm

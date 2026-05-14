@@ -52,8 +52,9 @@ python "$CODE_DIR/train_mirror_map.py" \
     --ema_rate     0.999 \
     --num_workers  8 \
     --log_every    50 \
-    --save_every   10 \
     --fp16
 
 # To resume from a checkpoint, add:
-#   --resume "$OUTPUT_DIR/ckpt_ep0050.pt"
+#   --resume "$OUTPUT_DIR/last.pt"
+# To stream metrics to Weights & Biases (online), add:
+#   --wandb --wandb_project cs159
