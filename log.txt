@@ -1,0 +1,18 @@
+kaywei log so i dont forget things xd
+
+5/13
+- added .toml and .yml files to allow for easy conda env activation (see .yml file for instructions). 
+can prolly delete .toml file tho since we're not making a package?
+- reorganized files -- see readme
+- added tests, just to make sure things run end to end (on dummy data) before submitting to hpc.
+tests/ folder is split into unit tests and integration tests. rn has unit and integration tests for phase1
+- added wandb logging to phase1_mirror_map/train_mirror_map.py. should save history.csv, best.pt, final.pt and
+log loss, l_recon, l_distr, l_cycle, mae, psnr, sam, ssim for both train and val to wandb
+
+TODO:
+- finish phase 2 (actually implenting the model) and phase 3 (finetuning)
+- make some tests for stuff?? to verify claude stuff
+- try running end to end on dummy data
+
+HMM
+- how to split into train / val xd? use a hold-out set, or just seed (is there a diff), or train/val/test?
