@@ -1,0 +1,71 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## What this repository is
+
+A CS159 course project on **spectrally consistent cloud removal for Sentinel-2 imagery** using the SEN12MS-CR benchmark. Two distinct model families live in the tree — they are *not* combined into a single pipeline:
+
+1. **NAMM mirror-map approach (Phase 1, primary, documented in README)** — `phase1_mirror_map/{icnn,inverse_map,losses,dataset,train_mirror_map}.py` and `phase1_mirror_map/train_mirror_map.slurm`. Trains a forward mirror map `g_phi` (ICNN gradient) and inverse map `f_psi` (ResNet) jointly so that a downstream EMRDM diffusion model can operate in an unconstrained mirror space while preserving spectral consistency on projection back. Phases 2 (EMRDM in mirror space) and 3 (inverse-map finetuning) are not yet present.
+2. **PDE-constrained diffusion approach (exploratory, parked in `dump/`)** — `dump/pde_diffusion_model.py`, `dump/validate_sen12mscr.py`. A score-matching denoiser that adds Navier-Stokes and Maxwell PDE residual losses. Self-contained; does not import from the NAMM files. Treat it as a parallel experiment, not a stage of the NAMM pipeline.
+
+The repo-root data downloader is `download_ROIs1158_spring.sh`. Other data utilities (`dump/dataLoader.py`, `dump/get_data.py`, `dump/dl_data.sh`, `dump/analysis.ipynb`) are not referenced by the documented Phase 1 pipeline and sit in `dump/` alongside the PDE track — keep them out of new Phase 1 code unless you have a reason to bring one back.
+
+`phase2_emrdm/`, `phase3_finetune/`, `utils/`, and `tests/unit/{phase1,phase2,phase3}/` + `tests/integration/` exist as empty scaffolding (held open by `.gitkeep`) for the README's forthcoming phases. They contain no `__init__.py` — when code lands there, decide on package structure then.
+
+## Environment
+
+Reuses the EMRDM conda environment. From the README:
+
+```bash
+conda create --name emrdm python=3.10
+conda activate emrdm
+pip install torch==2.2.1 torchaudio==2.2.1 torchvision==0.17.1 numpy==1.26.4
+MAX_JOBS=4 pip install flash_attn==2.5.9.post1 --no-build-isolation
+pip install natten==0.17.1+torch220cu121 -f https://shi-labs.com/natten/wheels
+pip install pytorch-lightning==2.3.0
+pip install wandb omegaconf rasterio tifffile scipy opencv-python lpips
+```
+
+There is no `requirements.txt`, no test suite, no linter config, and no `Makefile`. Verify changes by running training/validation directly.
+
+## Data
+
+`download_ROIs1158_spring.sh <dest>` fetches the ~30 GB spring ROI (cloudy S2 + cloud-free S2 + S1 SAR) from `dataserv.ub.tum.de` using the hardcoded `m1554803` credentials, extracts, and removes archives. Phase 1 only needs the `*_s2_cloudfree` tree; `SEN12MSCRCloudFreeDataset` in `phase1_mirror_map/dataset.py` discovers patches by globbing `<data_root>/<roi>_s2_cloudfree/**/*.tif`. Each patch is 256×256 with 13 bands, normalised by dividing reflectance by 10000.
+
+`dump/dl_data.sh` is an alternative interactive downloader for the full SEN12MS-CR / SEN12MS-CR-TS dataset.
+
+## Common commands
+
+**Phase 1 training (single GPU):**
+```bash
+cd phase1_mirror_map
+python train_mirror_map.py \
+    --data_root /scratch/$USER/cs159 \
+    --output_dir /scratch/$USER/cs159/checkpoints/phase1 \
+    --epochs 100 --batch_size 16 --fp16
+```
+
+**Resume:** add `--resume <path-to-ckpt>.pt`.
+
+**SLURM:** `sbatch phase1_mirror_map/train_mirror_map.slurm` — edit `CODE_DIR`, `DATA_ROOT`, `OUTPUT_DIR`, partition, and email first. The script's `CODE_DIR` is an absolute deployment path (`…/code/phase1_mirror_map/`).
+
+**Validation (PDE-diffusion track, parked):** `python dump/validate_sen12mscr.py …` (see argparse in the file). Expects directory layout `<root>/test/{s1,s2_cloudy,s2_cloudfree}/*.tif`.
+
+No single-test command exists because there are no tests.
+
+## Architecture notes worth knowing before editing
+
+- **`ICNN` in `phase1_mirror_map/icnn.py` enforces convexity by clamping `Wz` weights non-negative with `F.relu(self.Wz.weight)` at every forward pass.** Replacing the leaky-ReLU activation with anything having a negative slope < 0 would break convexity — the constructor asserts `negative_slope >= 0`. The strong-convexity term `(alpha/2) ‖x‖²` is added inside `ICNN.potential`, not in the loss; the `strong_convexity` arg passed through `ICNNLayer` is currently unused (the constraint lives at the potential level).
+- **`ICNNGradient.forward` calls `torch.autograd.grad(..., create_graph=self.training)`.** It needs `x.requires_grad_(True)` and a live grad graph, which is why `namm_loss` cannot be wrapped in `torch.no_grad()` for the mirror-map evaluation paths. Validation already handles this — it disables grad at the outer loop but `ICNNGradient` re-enables grad locally via `requires_grad_`.
+- **`namm_loss` in `phase1_mirror_map/losses.py`** orchestrates three losses: L1 cycle (`x → y → x` *and* `y → x → y`), `ConstraintLoss` on noisy-mirror reconstructions (samples `sigma ~ U[0, max_sigma]` per-example), and an L1 regulariser on the implied ICNN gradient `(y - α x)/(1 - α)`. The constraint loss internally runs `x_hat` and `x_ref` through a frozen VGG16 with a learned 13→3 band projection initialised to pick S2 bands B4/B3/B2 as RGB.
+- **`InverseMap` uses `GroupNorm(1, C)` = instance norm** and a final `ReLU` (reflectances are non-negative). The `residual=True` default adds the mirror-space input to the decoded output — relevant when interpreting reconstructions.
+- **Two optimisers** (one each for `g_phi`, `f_psi`), each with EMA shadows (`ema_rate=0.999`). EMA tracking is per-parameter on `state_dict`; checkpoints persist the shadows.
+- **Mixed precision via `torch.cuda.amp` (`GradScaler` + `autocast`).** This is the older `torch.cuda.amp` API, not `torch.amp` — keep it consistent if editing.
+
+## Conventions observed in the code
+
+- Sentinel-2 patches are `(13, 256, 256)` `float32` tensors in `[0, 1]` reflectance after the `/10000` clip.
+- Checkpoints: `best.pt` (lowest val loss), `ckpt_ep{NNNN}.pt` every `--save_every` epochs, `final.pt` at the end. All hold `g_phi`, `f_psi`, both optimisers, both EMAs, epoch, and `best_val_loss`.
+- Training log is a CSV at `<output_dir>/train_log.txt`.
+- The NAMM files do not import from the PDE-diffusion files or vice versa — keep that separation when adding code.

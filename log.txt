@@ -1,0 +1,8 @@
+kaywei log so i dont forget things xd
+
+5/13
+TODO:
+- organize files
+- finish phase 2 (actually implenting the model) and phase 3 (finetuning)
+- make some tests for stuff?? to verify claude stuff
+- try running end to end on dummy data
