@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git mv *)",
+      "Bash(python3.14 -c \"import tomllib; data = tomllib.load\\(open\\('/Users/kaywei/Documents/School/cs159/pyproject.toml','rb'\\)\\); print\\('pyproject ok:', data['project']['name'], data['project']['version']\\)\")",
+      "Bash(python3.14 -c ' *)",
+      "Bash(python3.14 -m pip install --user --quiet pyyaml)"
+    ]
+  }
+}

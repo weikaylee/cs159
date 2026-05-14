@@ -8,10 +8,14 @@ Usage:
         --epochs 100 \
         --batch_size 16
 
+To stream metrics to Weights & Biases (online):
+    python train_mirror_map.py ... --wandb --wandb_project cs159
+
 On SLURM, submit via the accompanying train_mirror_map.slurm script.
 """
 
 import argparse
+import csv
 import os
 import time
 
@@ -19,10 +23,19 @@ import torch
 import torch.nn as nn
 from torch.cuda.amp import GradScaler, autocast
 
+import wandb
+
 from dataset import build_dataloaders
 from icnn import ICNN, ICNNGradient
 from inverse_map import InverseMap
-from losses import ConstraintLoss, namm_loss
+from losses import ConstraintLoss, namm_loss, reconstruction_metrics
+
+
+HISTORY_COLUMNS = [
+    'phase', 'epoch', 'step', 'elapsed_s',
+    'loss', 'l_cycle', 'l_constr', 'l_reg',
+    'mae', 'sam', 'psnr', 'ssim',
+]
 
 
 # ── Argument parsing ──────────────────────────────────────────────────────────
@@ -61,13 +74,18 @@ def get_args():
     p.add_argument('--num_workers',  type=int, default=4)
     p.add_argument('--log_every',    type=int, default=50,
                    help='Log every N batches')
-    p.add_argument('--save_every',   type=int, default=10,
-                   help='Save checkpoint every N epochs')
     p.add_argument('--resume',       type=str, default=None,
                    help='Path to checkpoint to resume from')
     p.add_argument('--seed',         type=int, default=42)
     p.add_argument('--fp16',         action='store_true',
                    help='Use mixed-precision training')
+
+    # Wandb
+    p.add_argument('--wandb',          action='store_true',
+                   help='Stream metrics to Weights & Biases (online).')
+    p.add_argument('--wandb_project',  type=str, default='cs159')
+    p.add_argument('--wandb_run_name', type=str, default=None)
+    p.add_argument('--wandb_entity',   type=str, default=None)
     return p.parse_args()
 
 
@@ -117,12 +135,26 @@ def load_checkpoint(path, g_phi, f_psi, opt_g, opt_f, ema_g, ema_f):
     return ckpt['epoch'], ckpt.get('best_val_loss', float('inf'))
 
 
+# ── History CSV helpers ───────────────────────────────────────────────────────
+
+def _append_history_row(path: str, row: dict) -> None:
+    """Append a row to history.csv, writing the header on first call."""
+    new_file = not os.path.exists(path)
+    with open(path, 'a', newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=HISTORY_COLUMNS)
+        if new_file:
+            writer.writeheader()
+        writer.writerow({k: row.get(k, '') for k in HISTORY_COLUMNS})
+
+
 # ── Validation ────────────────────────────────────────────────────────────────
 
 @torch.no_grad()
 def validate(g_phi, f_psi, constraint_loss, val_loader, device, args):
     g_phi.eval(); f_psi.eval()
-    total_loss = 0.0
+    keys = ('loss', 'l_cycle', 'l_constr', 'l_reg',
+            'mae', 'sam', 'psnr', 'ssim')
+    totals = {k: 0.0 for k in keys}
     n = 0
     for x in val_loader:
         x = x.to(device)
@@ -135,10 +167,15 @@ def validate(g_phi, f_psi, constraint_loss, val_loader, device, args):
             strong_convexity=args.strong_convexity,
             device=device,
         )
-        total_loss += losses['loss'].item() * x.size(0)
-        n += x.size(0)
+        metrics = reconstruction_metrics(losses['x_recon'], x)
+        bsz = x.size(0)
+        for k in ('loss', 'l_cycle', 'l_constr', 'l_reg'):
+            totals[k] += losses[k].item() * bsz
+        for k in ('mae', 'sam', 'psnr', 'ssim'):
+            totals[k] += metrics[k].item() * bsz
+        n += bsz
     g_phi.train(); f_psi.train()
-    return total_loss / max(n, 1)
+    return {k: v / max(n, 1) for k, v in totals.items()}
 
 
 # ── Main training loop ────────────────────────────────────────────────────────
@@ -150,6 +187,14 @@ def main():
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f'Using device: {device}')
+
+    if args.wandb:
+        wandb.init(
+            project=args.wandb_project,
+            name=args.wandb_run_name,
+            entity=args.wandb_entity,
+            config=vars(args),
+        )
 
     # ── Data ─────────────────────────────────────────────────────────────────
     train_loader, val_loader = build_dataloaders(
@@ -198,10 +243,7 @@ def main():
         start_epoch, best_val_loss = load_checkpoint(
             args.resume, g_phi, f_psi, opt_g, opt_f, ema_g, ema_f)
 
-    # ── Training loop ────────────────────────────────────────────────────────
-    log_path = os.path.join(args.output_dir, 'train_log.txt')
-    with open(log_path, 'a') as log_f:
-        log_f.write(f'epoch,step,loss,l_cycle,l_constr,l_reg,elapsed\n')
+    log_path = os.path.join(args.output_dir, 'history.csv')
 
     for epoch in range(start_epoch, args.epochs):
         g_phi.train(); f_psi.train()
@@ -238,27 +280,77 @@ def main():
 
             if step % args.log_every == 0:
                 elapsed = time.time() - epoch_start
-                msg = (f'Ep {epoch+1}/{args.epochs} | '
-                       f'step {step} | '
-                       f'loss={losses["loss"].item():.4f} | '
-                       f'cyc={losses["l_cycle"].item():.4f} | '
-                       f'constr={losses["l_constr"].item():.4f} | '
-                       f'reg={losses["l_reg"].item():.4f} | '
+                with torch.no_grad():
+                    train_metrics = reconstruction_metrics(losses['x_recon'], x)
+
+                row = {
+                    'phase':     'train',
+                    'epoch':     epoch + 1,
+                    'step':      step,
+                    'elapsed_s': round(elapsed, 2),
+                    'loss':      losses['loss'].item(),
+                    'l_cycle':   losses['l_cycle'].item(),
+                    'l_constr':  losses['l_constr'].item(),
+                    'l_reg':     losses['l_reg'].item(),
+                    'mae':       train_metrics['mae'].item(),
+                    'sam':       train_metrics['sam'].item(),
+                    'psnr':      train_metrics['psnr'].item(),
+                    'ssim':      train_metrics['ssim'].item(),
+                }
+
+                msg = (f'Ep {epoch+1}/{args.epochs} | step {step} | '
+                       f'loss={row["loss"]:.4f} | '
+                       f'cyc={row["l_cycle"]:.4f} | '
+                       f'constr={row["l_constr"]:.4f} | '
+                       f'reg={row["l_reg"]:.4f} | '
+                       f'psnr={row["psnr"]:.2f} | ssim={row["ssim"]:.3f} | '
                        f't={elapsed:.1f}s')
                 print(msg)
-                with open(log_path, 'a') as log_f:
-                    log_f.write(
-                        f'{epoch+1},{step},'
-                        f'{losses["loss"].item():.6f},'
-                        f'{losses["l_cycle"].item():.6f},'
-                        f'{losses["l_constr"].item():.6f},'
-                        f'{losses["l_reg"].item():.6f},'
-                        f'{elapsed:.1f}\n')
+
+                _append_history_row(log_path, row)
+
+                if args.wandb:
+                    global_step = epoch * len(train_loader) + step
+                    wandb.log({
+                        'train/loss':    row['loss'],
+                        'train/l_cycle': row['l_cycle'],
+                        'train/l_constr': row['l_constr'],
+                        'train/l_reg':   row['l_reg'],
+                        'train/mae':     row['mae'],
+                        'train/sam':     row['sam'],
+                        'train/psnr':    row['psnr'],
+                        'train/ssim':    row['ssim'],
+                        'train/lr':      opt_g.param_groups[0]['lr'],
+                        'train/epoch':   epoch + 1,
+                    }, step=global_step)
 
         # ── Validation ───────────────────────────────────────────────────────
-        val_loss = validate(g_phi, f_psi, constraint_loss,
-                            val_loader, device, args)
+        val_metrics = validate(g_phi, f_psi, constraint_loss,
+                               val_loader, device, args)
+        val_loss = val_metrics['loss']
         print(f'  Val loss: {val_loss:.4f}  (best: {best_val_loss:.4f})')
+
+        _append_history_row(log_path, {
+            'phase':     'val',
+            'epoch':     epoch + 1,
+            'step':      '',
+            'elapsed_s': round(time.time() - epoch_start, 2),
+            **val_metrics,
+        })
+
+        if args.wandb:
+            val_step = (epoch + 1) * len(train_loader) - 1
+            wandb.log(
+                {f'val/{k}': v for k, v in val_metrics.items()}
+                | {'val/best_loss': min(best_val_loss, val_loss)},
+                step=val_step,
+            )
+
+        # ── Checkpoint: best.pt + last.pt ────────────────────────────────────
+        save_checkpoint(
+            os.path.join(args.output_dir, 'last.pt'),
+            epoch + 1, g_phi, f_psi, opt_g, opt_f, ema_g, ema_f,
+            best_val_loss)
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss
@@ -267,17 +359,8 @@ def main():
                 epoch + 1, g_phi, f_psi, opt_g, opt_f, ema_g, ema_f,
                 best_val_loss)
 
-        if (epoch + 1) % args.save_every == 0:
-            save_checkpoint(
-                os.path.join(args.output_dir, f'ckpt_ep{epoch+1:04d}.pt'),
-                epoch + 1, g_phi, f_psi, opt_g, opt_f, ema_g, ema_f,
-                best_val_loss)
-
-    # ── Save final ───────────────────────────────────────────────────────────
-    save_checkpoint(
-        os.path.join(args.output_dir, 'final.pt'),
-        args.epochs, g_phi, f_psi, opt_g, opt_f, ema_g, ema_f,
-        best_val_loss)
+    if args.wandb:
+        wandb.finish()
     print('Phase 1 training complete.')
 
 
