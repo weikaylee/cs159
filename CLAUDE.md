@@ -61,7 +61,7 @@ pytest tests/integration/test_train_mirror_map.py -v
 # or, without pytest installed:
 python tests/integration/test_train_mirror_map.py
 ```
-Lives at `tests/integration/test_train_mirror_map.py`. Points `--data_root` at `<repo>/data/`, uses `--patch_size 64` to random-crop the real 256×256 patches, runs one tiny epoch with `--wandb` enabled (run name `test_train_mirror_map` in the `cs159` project), and asserts `best.pt`, `last.pt`, `history.csv`, and the wandb summary contain all expected metric keys. **Skips cleanly when `data/` is absent.** **Requires `wandb login` and network access** — fails informatively otherwise.
+Lives at `tests/integration/test_train_mirror_map.py`. Points `--data_root` at `<repo>/data/`, uses `--patch_size 64` to random-crop the real 256×256 patches (matching the official NAMM mirror-map resolution), runs 10 tiny epochs with `--wandb` enabled (run name `test_train_mirror_map` in the `cs159` project), and asserts `best.pt`, `last.pt`, `history.csv`, and the wandb summary contain all expected metric keys. It passes a large `--log_every` so metrics are logged once per epoch (one train + one val row per epoch in `history.csv`) rather than per step. It monkeypatches the dataset to record every patch file loaded and asserts all of `data/` is used (10 epochs amortise the `drop_last`-dropped patch). **Skips cleanly when `data/` is absent.** **Requires `wandb login` and network access** — fails informatively otherwise.
 
 **Phase 1 unit tests** (CPU-only, no network):
 ```bash

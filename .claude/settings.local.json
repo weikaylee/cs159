@@ -8,7 +8,8 @@
       "Bash(curl -sI --max-time 30 -u m1554803:m1554803 \"https://dataserv.ub.tum.de/public.php/webdav/ROIs1158_spring_s2.tar.gz\")",
       "Bash(curl -sI --max-time 30 -u \":m1554803\" \"https://dataserv.ub.tum.de/public.php/webdav/ROIs1158_spring_s2.tar.gz\")",
       "Bash(curl -sIL --max-time 30 -b /tmp/cj.txt -c /tmp/cj.txt \"https://dataserv.ub.tum.de/s/m1554803/download?path=/&files=ROIs1158_spring_s2.tar.gz\")",
-      "Bash(curl -sI --max-time 30 -u m1554803:m1554803 \"https://dataserv.ub.tum.de/public.php/dav/files/m1554803/ROIs1158_spring_s2.tar.gz\")"
+      "Bash(curl -sI --max-time 30 -u m1554803:m1554803 \"https://dataserv.ub.tum.de/public.php/dav/files/m1554803/ROIs1158_spring_s2.tar.gz\")",
+      "Skill(update-config)"
     ]
   }
 }
