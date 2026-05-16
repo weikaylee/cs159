@@ -15,7 +15,7 @@ BASE_URL="https://dataserv.ub.tum.de/s/m1554803/download?path=/&files="
 # s1       = Sentinel-1 SAR (2 bands)             — auxiliary conditioning input
 ARCHIVES=(
     "ROIs1158_spring_s2.tar.gz"
-    "ROIs1158_spring_s2_cloudfree.tar.gz"
+    "ROIs1158_spring_s2_cloudy.tar.gz"
     "ROIs1158_spring_s1.tar.gz"
 )
 
