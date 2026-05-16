@@ -31,9 +31,11 @@ There is no `requirements.txt`, no test suite, no linter config, and no `Makefil
 
 ## Data
 
-`download_ROIs1158_spring.sh <dest>` fetches the ~30 GB spring ROI (cloudy S2 + cloud-free S2 + S1 SAR) from `dataserv.ub.tum.de` using the hardcoded `m1554803` credentials, extracts, and removes archives. Phase 1 only needs the `*_s2_cloudfree` tree; `SEN12MSCRCloudFreeDataset` in `phase1_mirror_map/dataset.py` discovers patches by globbing `<data_root>/<roi>_s2_cloudfree/**/*.tif`. Each patch is 256×256 with 13 bands, normalised by dividing reflectance by 10000.
+`download_ROIs1158_spring.sh <dest>` fetches the ~70 GB spring ROI from `dataserv.ub.tum.de` over wget FTP (creds `m1554803:m1554803`, baked into the script), extracts each archive, and removes it. The archive list in that script is stale (`_s2_cloudfree.tar.gz` doesn't exist on the server — the real cloud-free archive is bare `_s2.tar.gz`); use `download_local_data.sh` for the working pattern. Phase 1 only needs the cloud-free `*_s2` tree (the TUM archives use the `_s2_cloudy` suffix for the cloudy variant; bare `_s2` is the cloud-free reference); `SEN12MSCRCloudFreeDataset` in `phase1_mirror_map/dataset.py` discovers patches by globbing `<data_root>/<roi>_s2/**/*.tif`. Each patch is 256×256 with 13 bands, normalised by dividing reflectance by 10000.
 
 `dump/dl_data.sh` is an alternative interactive downloader for the full SEN12MS-CR / SEN12MS-CR-TS dataset.
+
+`download_local_data.py` (run with `python download_local_data.py`) fetches a small **aligned-triplet** subset into `./data/` for local dev and tests. Streams all three Phase-1/2 archives — `ROIs1158_spring_s2.tar.gz` (cloud-free, anchor), `ROIs1158_spring_s1.tar.gz` (SAR), `ROIs1158_spring_s2_cloudy.tar.gz` (cloudy) — from `wget` FTP through Python's `tarfile` (streaming `r|gz` mode), extracting members one at a time so the ~13-34 GB tarballs never land on disk. The anchor pass takes `PER_SCENE` patches from each of `N_SCENES` distinct scenes of s2 (default 20 × 10 = 200, env-overridable: `PER_SCENE=10 N_SCENES=5 python download_local_data.py`), recording their `<scene>_p<N>` patch IDs; the s1 and s2_cloudy passes extract only patches whose ID is in that anchor set. A final reconciliation pass drops any patch missing from one of the three subsets. Final disk footprint is ~1.5 GB; bandwidth scales with `N_SCENES` (tar is sequential, so reaching N scenes streams through the leading N scenes of each archive). Streaming has no resume — a dropped connection restarts that archive. Writes a `data/.done` marker; the integration smoke test below is skipped when `data/` is absent. *(The older `download_local_data.sh` is left in the tree but superseded — use the `.py`.)*
 
 ## Common commands
 
@@ -54,11 +56,12 @@ python train_mirror_map.py \
 
 **Phase 1 smoke test** (online wandb; downloads VGG16 weights once on first run, ~528 MB cached under `~/.cache/torch`):
 ```bash
+python download_local_data.py      # one-time: fetch ~200 patches into data/
 pytest tests/integration/test_train_mirror_map.py -v
 # or, without pytest installed:
 python tests/integration/test_train_mirror_map.py
 ```
-Lives at `tests/integration/test_train_mirror_map.py`. Patches `build_dataloaders` with synthetic (13, 64, 64) tensors, runs one tiny epoch with `--wandb` enabled (run name `test_train_mirror_map` in the `cs159` project), and asserts `best.pt`, `last.pt`, `history.csv`, and the wandb summary contain all expected metric keys. **Requires `wandb login` and network access** — fails informatively otherwise.
+Lives at `tests/integration/test_train_mirror_map.py`. Points `--data_root` at `<repo>/data/`, uses `--patch_size 64` to random-crop the real 256×256 patches (matching the official NAMM mirror-map resolution), runs 10 tiny epochs with `--wandb` enabled (run name `test_train_mirror_map` in the `cs159` project), and asserts `best.pt`, `last.pt`, `history.csv`, and the wandb summary contain all expected metric keys. It passes a large `--log_every` so metrics are logged once per epoch (one train + one val row per epoch in `history.csv`) rather than per step. It monkeypatches the dataset to record every patch file loaded and asserts all of `data/` is used (10 epochs amortise the `drop_last`-dropped patch). **Skips cleanly when `data/` is absent.** **Requires `wandb login` and network access** — fails informatively otherwise.
 
 **Phase 1 unit tests** (CPU-only, no network):
 ```bash
