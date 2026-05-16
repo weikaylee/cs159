@@ -83,12 +83,21 @@ pip install wandb omegaconf rasterio tifffile scipy opencv-python lpips
 
 ### 3. Download the dataset
 
+**Full dataset (cluster / training run, ~30 GB):**
 ```bash
 chmod +x download_ROIs1158_spring.sh
 ./download_ROIs1158_spring.sh /scratch/$USER/cs159
 ```
 
 This downloads ~30 GB (compressed) for the spring ROI: cloudy Sentinel-2, cloud-free Sentinel-2, and Sentinel-1 SAR. It extracts automatically and removes the archives to save space.
+
+**Local subset (laptop dev / tests, ~1.5 GB):**
+```bash
+python download_local_data.py                        # 10 patches x 3 scenes
+PER_SCENE=10 N_SCENES=5 python download_local_data.py # smaller / custom subset
+```
+
+Streams all three Phase-1/2 archives (cloud-free `_s2`, SAR `_s1`, cloudy `_s2_cloudy`) from `wget` FTP through Python's `tarfile`, extracting members one at a time so the multi-GB tarballs never land on disk. The anchor pass takes `PER_SCENE` patches from each of `N_SCENES` distinct scenes of the cloud-free archive (default 20 × 10 = 200), giving a scene-diverse subset; s1 and s2_cloudy are then filtered to those same patch IDs (`<scene>_p<N>`), and a reconciliation pass keeps only patches present in all three. Final disk footprint is ~1.5 GB (just the extracted patches). The integration smoke test under `tests/integration/` consumes the cloud-free subset and is skipped when it isn't present.
 
 For the full 620 GB dataset, see the [SEN12MS-CR download page](https://patricktum.github.io/cloud_removal/sen12mscr/).
 

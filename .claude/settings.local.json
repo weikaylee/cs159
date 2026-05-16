@@ -4,7 +4,11 @@
       "Bash(git mv *)",
       "Bash(python3.14 -c \"import tomllib; data = tomllib.load\\(open\\('/Users/kaywei/Documents/School/cs159/pyproject.toml','rb'\\)\\); print\\('pyproject ok:', data['project']['name'], data['project']['version']\\)\")",
       "Bash(python3.14 -c ' *)",
-      "Bash(python3.14 -m pip install --user --quiet pyyaml)"
+      "Bash(python3.14 -m pip install --user --quiet pyyaml)",
+      "Bash(curl -sI --max-time 30 -u m1554803:m1554803 \"https://dataserv.ub.tum.de/public.php/webdav/ROIs1158_spring_s2.tar.gz\")",
+      "Bash(curl -sI --max-time 30 -u \":m1554803\" \"https://dataserv.ub.tum.de/public.php/webdav/ROIs1158_spring_s2.tar.gz\")",
+      "Bash(curl -sIL --max-time 30 -b /tmp/cj.txt -c /tmp/cj.txt \"https://dataserv.ub.tum.de/s/m1554803/download?path=/&files=ROIs1158_spring_s2.tar.gz\")",
+      "Bash(curl -sI --max-time 30 -u m1554803:m1554803 \"https://dataserv.ub.tum.de/public.php/dav/files/m1554803/ROIs1158_spring_s2.tar.gz\")"
     ]
   }
 }

@@ -1,13 +1,13 @@
-"""Smoke test: Phase 1 mirror-map training runs end-to-end on dummy data.
+"""Smoke test: Phase 1 mirror-map training runs end-to-end on real data.
 
 What this test does
 -------------------
-1. Builds a tiny in-memory dataset of 13-band tensors shaped like SEN12MS-CR
-   patches after dataset.py's /10000 normalisation.
-2. Patches phase1_mirror_map.train_mirror_map.build_dataloaders to return
-   loaders over that dummy dataset, plus sys.argv to feed minimal CLI args.
-3. Invokes train_mirror_map.main() with --wandb enabled (online mode).
-4. Asserts:
+1. Locates the local SEN12MS-CR subset under <repo>/data/. Skips if absent
+   (run `bash download_local_data.sh` from the repo root to fetch it).
+2. Invokes train_mirror_map.main() pointed at that data, with --patch_size
+   64 so the real 256x256 patches are random-cropped down for a fast run,
+   and --wandb enabled (online mode).
+3. Asserts:
      - best.pt and last.pt exist (final.pt is no longer written)
      - history.csv has both train and val rows with all metric columns
      - the wandb run's on-disk summary contains all expected train/* and
@@ -15,6 +15,8 @@ What this test does
 
 Requires
 --------
+- A local data subset at <repo>/data/ROIs1158_spring_s2_cloudfree/...
+  (fetch via `bash download_local_data.sh`).
 - `wandb login` previously run in terminal (credentials in ~/.netrc).
 - Network access to api.wandb.ai.
 - VGG16 weights cached under ~/.cache/torch (downloaded on first run,
@@ -39,51 +41,34 @@ import sys
 import tempfile
 from unittest.mock import patch
 
-import torch
-from torch.utils.data import DataLoader, Dataset
+import pytest
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, os.path.join(REPO_ROOT, "phase1_mirror_map"))
 
 import train_mirror_map  # noqa: E402
 
-
-class _DummyS2Dataset(Dataset):
-    """In-memory stand-in for SEN12MSCRCloudFreeDataset.
-
-    Returns (13, 64, 64) float32 tensors in [0, 1] — the same shape and dtype
-    real Sentinel-2 patches take after /10000 reflectance normalisation.
-    """
-
-    def __init__(self, n: int, seed: int = 42):
-        g = torch.Generator().manual_seed(seed)
-        self.x = torch.rand(n, 13, 64, 64, generator=g)
-
-    def __len__(self):
-        return len(self.x)
-
-    def __getitem__(self, idx):
-        return self.x[idx]
-
-
-def _dummy_build_dataloaders(*args, **kwargs):
-    train_loader = DataLoader(_DummyS2Dataset(4, seed=42), batch_size=2,
-                              shuffle=True, num_workers=0, drop_last=True)
-    val_loader = DataLoader(_DummyS2Dataset(2, seed=43), batch_size=2,
-                            num_workers=0)
-    return train_loader, val_loader
+DATA_ROOT = os.path.join(REPO_ROOT, "data")
+S2_CLOUDFREE_DIR = os.path.join(DATA_ROOT, "ROIs1158_spring_s2")
 
 
 def test_training_smoke():
-    """Phase 1 training completes one epoch end-to-end on dummy data and
-    streams metrics to W&B online."""
+    """Phase 1 training completes one epoch end-to-end on real local data
+    and streams metrics to W&B online."""
+    if not os.path.isdir(S2_CLOUDFREE_DIR):
+        pytest.skip(
+            f"local data subset not found at {S2_CLOUDFREE_DIR} — "
+            f"run `bash download_local_data.sh` from the repo root"
+        )
+
     with tempfile.TemporaryDirectory() as tmp:
         argv = [
             "train_mirror_map.py",
-            "--data_root", tmp,
+            "--data_root", DATA_ROOT,
             "--output_dir", tmp,
             "--epochs", "1",
             "--batch_size", "2",
+            "--patch_size", "64",
             "--ngf", "8",
             "--n_res_blocks", "1",
             "--icnn_filters", "8",
@@ -96,9 +81,7 @@ def test_training_smoke():
             "--wandb_entity", "cs159",
         ]
         with patch.dict(os.environ, {"WANDB_DIR": tmp}), \
-             patch.object(sys, "argv", argv), \
-             patch.object(train_mirror_map, "build_dataloaders",
-                          _dummy_build_dataloaders):
+             patch.object(sys, "argv", argv):
             train_mirror_map.main()
 
         # Checkpoints: best.pt + last.pt only (final.pt + ckpt_ep* gone)
