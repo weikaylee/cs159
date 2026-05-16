@@ -4,15 +4,21 @@ SEN12MS-CR dataset loader for Phase 1 mirror map training.
 Phase 1 only requires cloud-free Sentinel-2 images (the constrained set).
 SAR and cloudy images are not needed until Phase 2 (EMRDM training).
 
-Expected directory layout after running the download script:
+Expected directory layout after running the download script. The TUM
+SEN12MS-CR archive `<roi>_s2.tar.gz` is the cloud-free reference (the
+cloudy variant uses an explicit `_s2_cloudy` suffix), and unpacks to:
+
     <data_root>/
-        ROIs1158_spring_s2_cloudfree/
-            ROIs1158_spring/
-                s2_cloudfree/
-                    <scene_id>/
-                        *.tif
+        ROIs1158_spring_s2/
+            s2_<scene>/
+                ROIs1158_spring_s2_<scene>_p<N>.tif
 
 Each .tif is a 256x256 patch with 13 Sentinel-2 bands.
+
+Note: when `roi=None`, the wildcard glob `*_s2` matches every cloud-free
+ROI directory in `<data_root>` but would also pick up `_s2_cloudy/` if the
+cloudy archive were extracted alongside. Pass an explicit `roi` (the
+default `'ROIs1158_spring'` does this) to avoid the ambiguity.
 """
 
 import os
@@ -41,7 +47,7 @@ class SEN12MSCRCloudFreeDataset(Dataset):
                      If None, loads all available ROIs.
     """
 
-    S2_CLOUDFREE_GLOB = '*_s2_cloudfree'
+    S2_CLOUDFREE_GLOB = '*_s2'
 
     def __init__(self,
                  data_root: str,
@@ -57,7 +63,7 @@ class SEN12MSCRCloudFreeDataset(Dataset):
 
         # Find all cloud-free .tif files
         if roi is not None:
-            pattern = os.path.join(data_root, f'{roi}_s2_cloudfree',
+            pattern = os.path.join(data_root, f'{roi}_s2',
                                    '**', '*.tif')
         else:
             pattern = os.path.join(data_root, self.S2_CLOUDFREE_GLOB,

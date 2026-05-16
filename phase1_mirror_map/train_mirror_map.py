@@ -71,6 +71,8 @@ def get_args():
     p.add_argument('--ema_rate',     type=float, default=0.999)
 
     # Misc
+    p.add_argument('--patch_size',   type=int, default=None,
+                   help='Random-crop spatial size (default: full 256x256)')
     p.add_argument('--num_workers',  type=int, default=4)
     p.add_argument('--log_every',    type=int, default=50,
                    help='Log every N batches')
@@ -202,6 +204,7 @@ def main():
         roi=args.roi,
         batch_size=args.batch_size,
         num_workers=args.num_workers,
+        patch_size=args.patch_size,
         seed=args.seed,
     )
 

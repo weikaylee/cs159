@@ -17,7 +17,7 @@ BASE_URL="ftp://${FTP_USER}:${FTP_PASS}@dataserv.ub.tum.de"
 # s1       = Sentinel-1 SAR (2 bands)             — auxiliary conditioning input
 ARCHIVES=(
     "ROIs1158_spring_s2.tar.gz"
-    "ROIs1158_spring_s2_cloudfree.tar.gz"
+    "ROIs1158_spring_s2_cloudy.tar.gz"
     "ROIs1158_spring_s1.tar.gz"
 )
 

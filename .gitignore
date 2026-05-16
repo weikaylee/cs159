@@ -1,0 +1,17 @@
+# Local data (fetch with `bash download_local_data.sh`)
+data/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Training artifacts
+*.pt
+wandb/
+checkpoints/
+
+# Editor / OS
+.DS_Store
+.vscode/
+.idea/

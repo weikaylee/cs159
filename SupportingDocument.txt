@@ -1,0 +1,69 @@
+From the official dataset documentation: https://dataserv.ub.tum.de/s/m1554803
+
+note to self: data is stored like data/ROIs1158_spring_s1/{sensor_number}_{scene_id}, eg data/ROIs1158_spring_s1/s1_1
+
+base_dir/
+└── {season}/                          # e.g. ROIs1158_spring
+    ├── s1_{scene_id}/                 # e.g. s1_1, s1_109
+    │   └── ROIs1158_spring_s1_1_p{patch_id}.tif
+    ├── s2_{scene_id}/                 # e.g. s2_1, s2_109
+    │   └── ROIs1158_spring_s2_1_p{patch_id}.tif
+    └── s2cloudy_{scene_id}/           # e.g. s2cloudy_1, s2cloudy_109
+        └── ROIs1158_spring_s2cloudy_1_p{patch_id}.tif
+
+4 levels deep:
+
+Season — 4 options: ROIs1158_spring, ROIs1868_summer, ROIs1970_fall, ROIs2017_winter
+Sensor + Scene — for every scene ID, there are 3 parallel sensor folders: s1_*, s2_*, s2cloudy_*
+Patch files — each scene contains multiple .tif patches (the actual image chips)
+
+Dataset name
+============
+SEN12MS-CR
+
+Year of publication	
+===================
+2020
+
+Author
+======
+Ebel, Patrick; Meraner, Andrea; Schmitt, Michael; Zhu, Xiaoxiang
+
+License
+=======
+CC-BY
+The dataset contains Copernicus data (2017). Terms and conditions apply: https://scihub.copernicus.eu/twiki/pub/SciHubWebPortal/TermsConditions/TC_Sentinel_Data_31072014.pdf
+
+Associated publication
+======================
+P. Ebel, A. Meraner, M. Schmitt and X. X. Zhu, "Multisensor Data Fusion for Cloud Removal in Global and All-Season Sentinel-2 Imagery," in IEEE Transactions on Geoscience and Remote Sensing, doi: 10.1109/TGRS.2020.3024744.
+
+Links
+=====
+Dataset:	https://mediatum.ub.tum.de/1554803
+Paper:		https://doi.org/10.1109/TGRS.2020.3024744
+
+Dataset structure
+=================
+12 .tar.gz-files: One for Sentinel-1 data (_s1), one for Sentinel-2 data (_s2), and one for cloudy Sentinel-2 data (_s2_cloudy) per one of four top-level structures: ROIs1158_spring, ROIs1868_summer, ROIs1970_fall, and ROIs2017_winter. 
+
+Dataset size
+============
+No. of files: 	122,218
+Storage:	291.9 GiB
+
+Description
+===========		
+The SEN12MS-CR dataset contains 122,218 patch triplets of corresponding Sentinel-1 dual-pol SAR data, Sentinel-2 multi-spectral images, and cloud-covered Sentinel-2 multi-spectral images. The patches are distributed across the land masses of the Earth and spread over all four meteorological seasons. This is reflected by the dataset structure. All patches are provided in the form of 16-bit GeoTiffs containing the following specific information:
+- Sentinel-1 SAR: 2 channels corresponding to sigma nought backscatter values in dB scale for VV and VH polarization.
+- Sentinel-2 multi-Spectral: 13 channels corresponding to the 13 spectral bands (B1, B2, B3, B4, B5, B6, B7, B8, B8a, B9, B10, B11, B12).
+- cloud-covered Sentinel-2 multi-Spectral: 13 channels corresponding to the 13 spectral bands (B1, B2, B3, B4, B5, B6, B7, B8, B8a, B9, B10, B11, B12).
+
+Auxiliary files
+===============
+- sen12ms_cr_dataLoader.py:	
+  generic data loader routine
+
+Please note:
+============
+If you use the dataset, please cite the associated publication mentioned above.
