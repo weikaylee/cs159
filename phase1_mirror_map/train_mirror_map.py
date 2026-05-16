@@ -44,8 +44,10 @@ def get_args():
     p = argparse.ArgumentParser(description='Phase 1: Train NAMM mirror maps')
     p.add_argument('--data_root',    required=True,
                    help='Path to SEN12MS-CR data root')
-    p.add_argument('--output_dir',   required=True,
+    p.add_argument('--output_dir',   default=None,
                    help='Where to save checkpoints and logs')
+    p.add_argument('--run_name',     type=str, default=None,
+                   help='Run name (used for default output_dir)')
     p.add_argument('--roi',          default='ROIs1158_spring',
                    help='Which ROI to train on')
 
@@ -184,6 +186,9 @@ def validate(g_phi, f_psi, constraint_loss, val_loader, device, args):
 
 def main():
     args = get_args()
+    if args.output_dir is None:
+        run_name = args.run_name or args.wandb_run_name or 'train_mirror_map'
+        args.output_dir = os.path.join(os.getcwd(), 'runs', run_name)
     torch.manual_seed(args.seed)
     os.makedirs(args.output_dir, exist_ok=True)
 
@@ -252,6 +257,11 @@ def main():
         g_phi.train(); f_psi.train()
         epoch_start = time.time()
 
+        train_keys = ('loss', 'l_cycle', 'l_constr', 'l_reg',
+                      'mae', 'sam', 'psnr', 'ssim')
+        train_totals = {k: 0.0 for k in train_keys}
+        train_n = 0
+
         for step, x in enumerate(train_loader):
             x = x.to(device, non_blocking=True)
 
@@ -281,51 +291,58 @@ def main():
             ema_g.update(g_phi)
             ema_f.update(f_psi)
 
+            with torch.no_grad():
+                batch_metrics = reconstruction_metrics(losses['x_recon'], x)
+
+            bsz = x.size(0)
+            train_totals['loss'] += losses['loss'].item() * bsz
+            train_totals['l_cycle'] += losses['l_cycle'].item() * bsz
+            train_totals['l_constr'] += losses['l_constr'].item() * bsz
+            train_totals['l_reg'] += losses['l_reg'].item() * bsz
+            train_totals['mae'] += batch_metrics['mae'].item() * bsz
+            train_totals['sam'] += batch_metrics['sam'].item() * bsz
+            train_totals['psnr'] += batch_metrics['psnr'].item() * bsz
+            train_totals['ssim'] += batch_metrics['ssim'].item() * bsz
+            train_n += bsz
+
             if step % args.log_every == 0:
                 elapsed = time.time() - epoch_start
-                with torch.no_grad():
-                    train_metrics = reconstruction_metrics(losses['x_recon'], x)
-
-                row = {
-                    'phase':     'train',
-                    'epoch':     epoch + 1,
-                    'step':      step,
-                    'elapsed_s': round(elapsed, 2),
-                    'loss':      losses['loss'].item(),
-                    'l_cycle':   losses['l_cycle'].item(),
-                    'l_constr':  losses['l_constr'].item(),
-                    'l_reg':     losses['l_reg'].item(),
-                    'mae':       train_metrics['mae'].item(),
-                    'sam':       train_metrics['sam'].item(),
-                    'psnr':      train_metrics['psnr'].item(),
-                    'ssim':      train_metrics['ssim'].item(),
-                }
-
                 msg = (f'Ep {epoch+1}/{args.epochs} | step {step} | '
-                       f'loss={row["loss"]:.4f} | '
-                       f'cyc={row["l_cycle"]:.4f} | '
-                       f'constr={row["l_constr"]:.4f} | '
-                       f'reg={row["l_reg"]:.4f} | '
-                       f'psnr={row["psnr"]:.2f} | ssim={row["ssim"]:.3f} | '
+                       f'loss={losses["loss"].item():.4f} | '
+                       f'cyc={losses["l_cycle"].item():.4f} | '
+                       f'constr={losses["l_constr"].item():.4f} | '
+                       f'reg={losses["l_reg"].item():.4f} | '
+                       f'psnr={batch_metrics["psnr"].item():.2f} | '
+                       f'ssim={batch_metrics["ssim"].item():.3f} | '
                        f't={elapsed:.1f}s')
                 print(msg)
 
-                _append_history_row(log_path, row)
+        # ── Train epoch metrics ─────────────────────────────────────────────
+        train_den = max(train_n, 1)
+        train_avg = {k: v / train_den for k, v in train_totals.items()}
 
-                if args.wandb:
-                    global_step = epoch * len(train_loader) + step
-                    wandb.log({
-                        'train/loss':    row['loss'],
-                        'train/l_cycle': row['l_cycle'],
-                        'train/l_constr': row['l_constr'],
-                        'train/l_reg':   row['l_reg'],
-                        'train/mae':     row['mae'],
-                        'train/sam':     row['sam'],
-                        'train/psnr':    row['psnr'],
-                        'train/ssim':    row['ssim'],
-                        'train/lr':      opt_g.param_groups[0]['lr'],
-                        'train/epoch':   epoch + 1,
-                    }, step=global_step)
+        _append_history_row(log_path, {
+            'phase':     'train',
+            'epoch':     epoch + 1,
+            'step':      '',
+            'elapsed_s': round(time.time() - epoch_start, 2),
+            **train_avg,
+        })
+
+        if args.wandb:
+            train_step = (epoch + 1) * len(train_loader) - 1
+            wandb.log({
+                'train/loss':    train_avg['loss'],
+                'train/l_cycle': train_avg['l_cycle'],
+                'train/l_constr': train_avg['l_constr'],
+                'train/l_reg':   train_avg['l_reg'],
+                'train/mae':     train_avg['mae'],
+                'train/sam':     train_avg['sam'],
+                'train/psnr':    train_avg['psnr'],
+                'train/ssim':    train_avg['ssim'],
+                'train/lr':      opt_g.param_groups[0]['lr'],
+                'train/epoch':   epoch + 1,
+            }, step=train_step)
 
         # ── Validation ───────────────────────────────────────────────────────
         val_metrics = validate(g_phi, f_psi, constraint_loss,
@@ -350,15 +367,16 @@ def main():
             )
 
         # ── Checkpoint: best.pt + last.pt ────────────────────────────────────
-        save_checkpoint(
-            os.path.join(args.output_dir, 'last.pt'),
-            epoch + 1, g_phi, f_psi, opt_g, opt_f, ema_g, ema_f,
-            best_val_loss)
-
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             save_checkpoint(
                 os.path.join(args.output_dir, 'best.pt'),
+                epoch + 1, g_phi, f_psi, opt_g, opt_f, ema_g, ema_f,
+                best_val_loss)
+
+        if epoch == args.epochs - 1:
+            save_checkpoint(
+                os.path.join(args.output_dir, 'last.pt'),
                 epoch + 1, g_phi, f_psi, opt_g, opt_f, ema_g, ema_f,
                 best_val_loss)
 
