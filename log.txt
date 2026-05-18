@@ -12,7 +12,15 @@ log loss, l_recon, l_distr, l_cycle, mae, psnr, sam, ssim for both train and val
 TODO:
 - finish phase 2 (actually implenting the model) and phase 3 (finetuning)
 - make some tests for stuff?? to verify claude stuff
-- try running end to end on dummy data
+- try running end to end on dummy data, or download some data locally just to test
 
 HMM
 - how to split into train / val xd? use a hold-out set, or just seed (is there a diff), or train/val/test?
+
+5/15
+- finish script to download local data (200 tifs each from cloudy, cloud-free, and sar)l roughly 1.6 gb for this guh
+- see SupportingDocument.txt for descr on data organization! (from the authors)
+- verify that mirror map works on local, on hpc, and on colab, both with local data and with box
+
+TODO
+- move onto phase 2?
