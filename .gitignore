@@ -10,6 +10,7 @@ __pycache__/
 *.pt
 wandb/
 checkpoints/
+runs/
 
 # Editor / OS
 .DS_Store
