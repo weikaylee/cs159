@@ -130,24 +130,38 @@ class ConstraintLoss(nn.Module):
         self.style_weight = style_weight
         self.vgg = VGGFeatureExtractor(n_input_channels)
 
-    def forward(self, x_hat: torch.Tensor,
-                x_ref: torch.Tensor) -> torch.Tensor:
+    def forward_terms(self, x_hat: torch.Tensor,
+                      x_ref: torch.Tensor) -> dict:
         """
         Args:
             x_hat: (B, C, H, W) images restored to constrained space by f_psi.
             x_ref: (B, C, H, W) cloud-free reference images.
         Returns:
-            Scalar constraint distance.
+            Dict with the total loss, the three sub-losses, and the VGG
+            feature maps used to compute them.
         """
         recon = l_recon(x_hat, x_ref)
 
         feats_hat = self.vgg(x_hat)
         feats_ref = self.vgg(x_ref)
 
-        dis   = l_dis(feats_hat, feats_ref)
+        dis = l_dis(feats_hat, feats_ref)
         style = l_style(feats_hat, feats_ref)
+        loss = recon + dis + self.style_weight * style
 
-        return recon + dis + self.style_weight * style
+        return {
+            'loss': loss,
+            'recon': recon,
+            'dis': dis,
+            'style': style,
+            'feats_hat': feats_hat,
+            'feats_ref': feats_ref,
+        }
+
+    def forward(self, x_hat: torch.Tensor,
+                x_ref: torch.Tensor) -> torch.Tensor:
+        """Return the scalar constraint distance."""
+        return self.forward_terms(x_hat, x_ref)['loss']
 
 
 # ── Reconstruction-quality metrics ─────────────────────────────────────────────
