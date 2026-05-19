@@ -27,3 +27,17 @@ TODO
 - move onto phase 2?
 - if train_mirror_map is good, can we just go ahead and train it on our data..? (cus dont need emrdm rn?)
 - verify that loss is correct!!!! this is the most important part
+
+5/19 verifying phase 1 claude code
+- losses: added sam and per-band mean-std loss terms, since vgg can only be applied to rgb bands (vgg is trained on imagenet) which means we're not actually incorporating spectral consistency
+    - see notes.txt for more motiviation
+- changed VGGFeatureExtractor class to apply vgg on rgb bands, instead of using learned projection from 13-band img to 3-band img
+- updated VGGFeatureExtractor to use vgg19, as specified in paper. also ensure that this is followed:
+
+VGG-19 consists of 19 layers, including 16 convolutional layers and 3 fully connected layers. In style transfer, we use conv11, conv21, conv31, conv41, and conv51
+for style representation, and conv42 for content representation. The weights are set as 1.0, 0.8, 0.5, 0.3, 0.1. 
+
+- ^see notes.txt for motiviation
+- changed l_distr to use gaussian kernel as phi, as suggested by paper. see docstrings in losses.py for explanations (trusting claude on this one lol)
+- changed l_style to use correct normalization as defined in paper (before, was doing an extra square in gram matrix func)
+- changed namm_loss function to follow paper's equations; before, implemented smth hallucinated lowk
