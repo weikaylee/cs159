@@ -18,9 +18,12 @@ HMM
 - how to split into train / val xd? use a hold-out set, or just seed (is there a diff), or train/val/test?
 
 5/15
-- finish script to download local data (200 tifs each from cloudy, cloud-free, and sar)l roughly 1.6 gb for this guh
-- see SupportingDocument.txt for descr on data organization! (from the authors)
-- verify that mirror map works on local, on hpc, and on colab, both with local data and with box
+- finished script to download local data (90 tifs total; 10 tifs from 3 scenes across cloudy, cloud-free, and sar; 30 triplets)
+- see SupportingDocument.txt for descr on data organization! and what each subdir means!! (from the authors)
+- verified that mirror map works on local and on hpc with the actual data; tests and training dummy mirror map model works
+- created script to visualize triplets (view_triplets.ipynb)
 
 TODO
 - move onto phase 2?
+- if train_mirror_map is good, can we just go ahead and train it on our data..? (cus dont need emrdm rn?)
+- verify that loss is correct!!!! this is the most important part
