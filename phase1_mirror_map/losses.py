@@ -2,15 +2,19 @@
 Constraint distance function l_constr and NAMM training losses.
 
 l_constr = L_recon + L_dis + style_weight * L_style
-  - L_recon: pixel-wise MSE between generated and reference images.
-  - L_dis:   MMD-style distribution loss via VGG feature maps in RKHS.
-  - L_style: Gram-matrix style loss over VGG feature maps.
+                    + sam_weight * L_sam + moment_weight * L_moments
+    - L_recon:   pixel-wise MSE between generated and reference images.
+    - L_dis:     Gaussian-kernel MMD distribution loss on VGG-19 content.
+    - L_style:   Gram-matrix style loss over VGG-19 style layers.
+    - L_sam:     Spectral Angle Mapper loss (per-pixel spectral angle).
+    - L_moments: per-band mean + std matching across batch/spatial dims.
 
 The combined loss is differentiable end-to-end, allowing gradients to flow
 through f_psi during NAMM joint training.
 """
 
 import torch
+from typing import cast
 import torch.nn as nn
 import torch.nn.functional as F
 import torchvision.models as models
@@ -19,55 +23,64 @@ import torchvision.models as models
 # ── VGG feature extractor ──────────────────────────────────────────────────────
 
 class VGGFeatureExtractor(nn.Module):
-    """Extract intermediate VGG-16 feature maps for style and distribution loss.
+    """Extract VGG-19 feature maps for style and content losses.
 
-    Because Sentinel-2 has 13 bands, we project to 3 channels before passing
-    through VGG.  The projection is a learned 1x1 conv initialised to average
-    the bands most similar to RGB (B4, B3, B2 → indices 3, 2, 1).
+    Style layers: conv1_1, conv2_1, conv3_1, conv4_1, conv5_1 with weights
+    [1.0, 0.8, 0.5, 0.3, 0.1]. Content/distribution layer: conv4_2.
+
+    Because Sentinel-2 has 13 bands, we select the RGB channels directly
+    before passing through VGG: B04 (Red), B03 (Green), B02 (Blue).
     """
 
-    # VGG-16 layers up to relu1_2, relu2_2, relu3_3, relu4_3
-    LAYER_INDICES = [4, 9, 16, 23]
+    STYLE_LAYER_INDICES = [1, 6, 11, 20, 29]   # relu1_1 ... relu5_1
+    CONTENT_LAYER_INDEX = 22                  # relu4_2
+    STYLE_WEIGHTS = [1.0, 0.8, 0.5, 0.3, 0.1]
 
     def __init__(self, n_input_channels: int = 13):
         super().__init__()
-        # Band projection: 13 → 3
-        self.band_proj = nn.Conv2d(n_input_channels, 3, 1, bias=False)
-        # Initialise to select the RGB-like bands (B4=3, B3=2, B2=1 in 0-index)
-        with torch.no_grad():
-            w = torch.zeros(3, n_input_channels, 1, 1)
-            w[0, 3] = 1.0   # Red   ← B4
-            w[1, 2] = 1.0   # Green ← B3
-            w[2, 1] = 1.0   # Blue  ← B2
-            self.band_proj.weight.copy_(w)
-
-        vgg = models.vgg16(weights=models.VGG16_Weights.DEFAULT)
-        features = list(vgg.features)
-        self.slices = nn.ModuleList()
-        prev = 0
-        for idx in self.LAYER_INDICES:
-            self.slices.append(nn.Sequential(*features[prev:idx + 1]))
-            prev = idx + 1
+        vgg = models.vgg19(weights=models.VGG19_Weights.DEFAULT)
+        self.features = vgg.features
 
         # Freeze VGG weights
         for p in self.parameters():
-            if p is not self.band_proj.weight:
-                p.requires_grad_(False)
+            p.requires_grad_(False)
 
-    def forward(self, x: torch.Tensor) -> list[torch.Tensor]:
-        """Return list of feature maps at each VGG slice."""
-        h = self.band_proj(x)
+    @property
+    def style_weights(self) -> list[float]:
+        return self.STYLE_WEIGHTS
+
+    def forward(self, x: torch.Tensor) -> dict:
+        """Return dict with style feature list and content feature map."""
+        # Sentinel-2 RGB bands (1-indexed): B02=Blue, B03=Green, B04=Red
+        # Convert to 0-index: [1, 2, 3], ordered as RGB: [Red, Green, Blue]
+        h = x[:, [3, 2, 1], ...]
         # Normalise to ImageNet stats
         mean = torch.tensor([0.485, 0.456, 0.406],
                              device=x.device).view(1, 3, 1, 1)
         std = torch.tensor([0.229, 0.224, 0.225],
                             device=x.device).view(1, 3, 1, 1)
         h = (h - mean) / std
-        feats = []
-        for s in self.slices:
-            h = s(h)
-            feats.append(h)
-        return feats
+
+        style_feats = []
+        content_feat = None
+        max_idx = max(self.STYLE_LAYER_INDICES + [self.CONTENT_LAYER_INDEX])
+        features = list(self.features.children())
+        for idx, layer in enumerate(features):
+            h = layer(h)
+            if idx in self.STYLE_LAYER_INDICES:
+                style_feats.append(h)
+            if idx == self.CONTENT_LAYER_INDEX:
+                content_feat = h
+            if idx >= max_idx:
+                break
+
+        if content_feat is None:
+            raise RuntimeError("VGG content feature not captured (conv4_2).")
+
+        return {
+            'style': style_feats,
+            'content': content_feat,
+        }
 
 
 # ── Individual loss terms ───────────────────────────────────────────────────────
@@ -77,57 +90,181 @@ def l_recon(x_hat: torch.Tensor, x_ref: torch.Tensor) -> torch.Tensor:
     return F.mse_loss(x_hat, x_ref)
 
 
-def l_dis(feats_gen: list[torch.Tensor],
-          feats_ref: list[torch.Tensor]) -> torch.Tensor:
-    """Distribution loss: squared MMD on mean feature maps (Eq. 2).
+def _gaussian_mmd_squared(
+    source: torch.Tensor,
+    target: torch.Tensor,
+    kernel_mul: float = 2.0,
+    kernel_num: int = 5,
+) -> torch.Tensor:
+    """Squared MMD between two sample sets using a multi-bandwidth Gaussian kernel.
 
-    Computes ||mean(phi(x_gen)) - mean(phi(x_ref))||^2 over the batch,
-    summed across VGG layers.  phi is implicitly the RKHS feature map.
+    Implements MMD^2 = E[k(x,x')] + E[k(y,y')] - 2 E[k(x,y)] via the kernel trick,
+    which is the RKHS norm of the difference of mean embeddings.
+
+    Args:
+        source: (N_s, D) samples from the generated distribution.
+        target: (N_t, D) samples from the reference distribution.
+        kernel_mul: Multiplier between successive kernel bandwidths.
+        kernel_num: Number of Gaussian kernels to sum (multi-bandwidth trick).
+
+    Returns:
+        Scalar tensor: squared MMD.
     """
-    loss = 0.0
-    for fg, fr in zip(feats_gen, feats_ref):
-        # Mean over batch, then over spatial dims → (C,)
-        mu_gen = fg.mean(dim=(0, 2, 3))
-        mu_ref = fr.mean(dim=(0, 2, 3))
-        loss = loss + (mu_gen - mu_ref).pow(2).sum()
+    n_s, n_t = source.size(0), target.size(0)
+    total = torch.cat([source, target], dim=0)             # (N_s + N_t, D)
+
+    # Pairwise squared L2 distances
+    sq_dist = torch.cdist(total, total, p=2.0) ** 2        # (N, N)
+
+    # Median heuristic for the base bandwidth (detached so it's a hyperparam)
+    with torch.no_grad():
+        n_total = sq_dist.size(0)
+        bandwidth = sq_dist.sum() / (n_total * n_total - n_total + 1e-8)
+        bandwidth = bandwidth / (kernel_mul ** (kernel_num // 2))
+
+    # Sum of Gaussian kernels at multiple bandwidths
+    kernels = torch.zeros_like(sq_dist)
+    for i in range(kernel_num):
+        kernels = kernels + torch.exp(
+            -sq_dist / (bandwidth * (kernel_mul ** i) + 1e-8)
+        )
+
+    K_ss = kernels[:n_s, :n_s]
+    K_tt = kernels[n_s:, n_s:]
+    K_st = kernels[:n_s, n_s:]
+    return K_ss.mean() + K_tt.mean() - 2.0 * K_st.mean()
+
+
+def l_dis(
+    feats_gen: list[torch.Tensor] | torch.Tensor,
+    feats_ref: list[torch.Tensor] | torch.Tensor,
+    kernel_mul: float = 2.0,
+    kernel_num: int = 5,
+    max_samples: int = 1024,
+) -> torch.Tensor:
+    """Distribution loss: squared MMD in a Gaussian-kernel RKHS (paper Eq. 4).
+
+    L_dis = || (1/N) sum_i phi(x_i) - (1/N) sum_j phi(x_hat_j) ||_H^2
+
+    where phi is the implicit feature map of a Gaussian kernel. Computed via
+    the kernel trick — we never materialise phi(x). Each spatial location in
+    each feature map is treated as a sample in C-dim space.
+
+    For VGG-19, pass either:
+      - a single content feature map (conv4_2) as a Tensor, or
+      - a list of feature maps (e.g. 5 style layers) — losses are summed.
+
+    Args:
+        feats_gen: (B, C, H, W) generated feature map(s).
+        feats_ref: (B, C, H, W) reference feature map(s).
+        kernel_mul, kernel_num: Multi-bandwidth Gaussian kernel parameters.
+        max_samples: Cap on samples per layer to keep the kernel matrix tractable.
+
+    Returns:
+        Scalar tensor: summed squared MMD across layers.
+    """
+    if isinstance(feats_gen, torch.Tensor):
+        feats_gen_list = [feats_gen]
+        feats_ref_list = [cast(torch.Tensor, feats_ref)]
+    else:
+        feats_gen_list = cast(list[torch.Tensor], feats_gen)
+        feats_ref_list = cast(list[torch.Tensor], feats_ref)
+
+    loss = torch.zeros((), device=feats_gen_list[0].device)
+    for fg, fr in zip(feats_gen_list, feats_ref_list):
+        b, c, h, w = fg.shape
+        # Each spatial location is a sample in R^C: (B*H*W, C)
+        src = fg.permute(0, 2, 3, 1).reshape(-1, c)
+        tgt = fr.permute(0, 2, 3, 1).reshape(-1, c)
+
+        # Subsample for memory — kernel matrix is O(N^2)
+        if src.size(0) > max_samples:
+            idx = torch.randperm(src.size(0), device=src.device)[:max_samples]
+            src = src[idx]
+        if tgt.size(0) > max_samples:
+            idx = torch.randperm(tgt.size(0), device=tgt.device)[:max_samples]
+            tgt = tgt[idx]
+
+        loss = loss + _gaussian_mmd_squared(
+            src, tgt, kernel_mul=kernel_mul, kernel_num=kernel_num
+        )
     return loss
 
 
 def gram_matrix(feat: torch.Tensor) -> torch.Tensor:
-    """Gram matrix G = F @ F^T / (C * H * W)^2, shape (B, C, C)."""
+    """Unnormalised Gram matrix G = F F^T, shape (B, C, C).
+    
+    Captures channel-wise correlations in the feature map. Normalisation
+    is applied in the style loss (see l_style) following Gatys et al. /
+    SatelliteMaker's Eq. 6.
+    """
     B, C, H, W = feat.shape
     f = feat.view(B, C, H * W)
-    G = torch.bmm(f, f.transpose(1, 2))
-    return G / (C * H * W) ** 2
+    return torch.bmm(f, f.transpose(1, 2))
 
 
-def l_style(feats_gen: list[torch.Tensor],
-            feats_ref: list[torch.Tensor]) -> torch.Tensor:
-    """Gram-matrix style loss (Eq. 3)."""
-    loss = 0.0
-    for fg, fr in zip(feats_gen, feats_ref):
+def l_style(
+    feats_gen: list[torch.Tensor],
+    feats_ref: list[torch.Tensor],
+    weights: list[float] | None = None,
+) -> torch.Tensor:
+    """Gram-matrix style loss over style layers (paper Eq. 6).
+
+    L_style = sum_l  w_l * (1 / (4 C_l^2 H_l^2 W_l^2)) * || G_gen^l - G_ref^l ||_F^2
+
+    """
+    if weights is None:
+        weights = [1.0] * len(feats_gen)
+    if len(weights) != len(feats_gen):
+        raise ValueError("Style weights must match number of feature maps.")
+
+    loss = torch.zeros((), device=feats_gen[0].device)
+    for fg, fr, w in zip(feats_gen, feats_ref, weights):
+        _, C, H, W = fg.shape
         Gg = gram_matrix(fg)
         Gr = gram_matrix(fr)
-        loss = loss + (Gg - Gr).pow(2).sum(dim=(1, 2)).mean()
+        # Squared Frobenius norm of the Gram difference, per sample
+        diff_sq = (Gg - Gr).pow(2).sum(dim=(1, 2))           # (B,)
+        # Paper's normalisation: 1 / (4 C^2 H^2 W^2)
+        denom = 4.0 * (C ** 2) * (H ** 2) * (W ** 2)
+        loss = loss + w * diff_sq.mean() / denom
     return loss
+
+
+def l_moments(x_hat: torch.Tensor,
+              x_ref: torch.Tensor,
+              eps: float = 1e-6) -> torch.Tensor:
+    """Per-band mean + std matching across batch and spatial dims."""
+    mean_hat = x_hat.mean(dim=(0, 2, 3))
+    mean_ref = x_ref.mean(dim=(0, 2, 3))
+    std_hat = x_hat.std(dim=(0, 2, 3), unbiased=False).clamp(min=eps)
+    std_ref = x_ref.std(dim=(0, 2, 3), unbiased=False).clamp(min=eps)
+    return F.mse_loss(mean_hat, mean_ref) + F.mse_loss(std_hat, std_ref)
 
 
 # ── Combined constraint distance function ──────────────────────────────────────
 
 class ConstraintLoss(nn.Module):
-    """l_constr = L_recon + L_dis + style_weight * L_style.
+    """l_constr = L_recon + L_dis + style_weight * L_style +
+    sam_weight * L_sam + moment_weight * L_moments.
 
     Used both to define the NAMM constraint and to evaluate spectral consistency.
 
     Args:
         style_weight:     Weight for the style loss (100 as in Yu et al.).
         n_input_channels: Number of image channels (13 for Sentinel-2).
+        sam_weight:       Weight for SAM spectral-angle loss.
+        moment_weight:    Weight for per-band mean/std matching.
     """
 
     def __init__(self, style_weight: float = 100.0,
-                 n_input_channels: int = 13):
+                 n_input_channels: int = 13,
+                 sam_weight: float = 0,
+                 moment_weight: float = 0):
         super().__init__()
         self.style_weight = style_weight
+        self.sam_weight = sam_weight
+        self.moment_weight = moment_weight
         self.vgg = VGGFeatureExtractor(n_input_channels)
 
     def forward_terms(self, x_hat: torch.Tensor,
@@ -137,7 +274,7 @@ class ConstraintLoss(nn.Module):
             x_hat: (B, C, H, W) images restored to constrained space by f_psi.
             x_ref: (B, C, H, W) cloud-free reference images.
         Returns:
-            Dict with the total loss, the three sub-losses, and the VGG
+            Dict with the total loss, the sub-losses, and the VGG
             feature maps used to compute them.
         """
         recon = l_recon(x_hat, x_ref)
@@ -145,15 +282,24 @@ class ConstraintLoss(nn.Module):
         feats_hat = self.vgg(x_hat)
         feats_ref = self.vgg(x_ref)
 
-        dis = l_dis(feats_hat, feats_ref)
-        style = l_style(feats_hat, feats_ref)
-        loss = recon + dis + self.style_weight * style
+        dis = l_dis(feats_hat['content'], feats_ref['content'])
+        style = l_style(feats_hat['style'], feats_ref['style'],
+                weights=self.vgg.style_weights)
+        sam = l_sam(x_hat, x_ref)
+        moments = l_moments(x_hat, x_ref)
+        loss = (recon
+            + dis
+            + self.style_weight * style
+            + self.sam_weight * sam
+            + self.moment_weight * moments)
 
         return {
             'loss': loss,
             'recon': recon,
             'dis': dis,
             'style': style,
+            'sam': sam,
+            'moments': moments,
             'feats_hat': feats_hat,
             'feats_ref': feats_ref,
         }
@@ -184,6 +330,11 @@ def spectral_angle_mapper(x_hat: torch.Tensor,
     return torch.acos(cos).mean()
 
 
+def l_sam(x_hat: torch.Tensor, x_ref: torch.Tensor) -> torch.Tensor:
+    """Spectral Angle Mapper loss (mean angle over all pixels)."""
+    return spectral_angle_mapper(x_hat, x_ref)
+
+
 def reconstruction_metrics(x_hat: torch.Tensor,
                            x_ref: torch.Tensor,
                            data_range: float = 1.0) -> dict:
@@ -209,79 +360,70 @@ def reconstruction_metrics(x_hat: torch.Tensor,
 
 # ── Full NAMM objective ─────────────────────────────────────────────────────────
 
-def namm_loss(g_phi: nn.Module,
-              f_psi: nn.Module,
-              constraint_loss: ConstraintLoss,
-              x: torch.Tensor,
-              max_sigma: float = 0.1,
-              cycle_weight: float = 1.0,
-              constraint_weight: float = 1.0,
-              reg_weight: float = 0.001,
-              strong_convexity: float = 0.3,
-              device: torch.device = None) -> dict:
-    """Full NAMM training loss for one batch.
+def namm_loss(
+    g_phi: nn.Module,
+    f_psi: nn.Module,
+    constraint_loss: ConstraintLoss,
+    x: torch.Tensor,
+    max_sigma: float = 0.1,
+    cycle_weight: float = 1.0,
+    constraint_weight: float = 1.0,
+    reg_weight: float = 0.001,
+    device: torch.device | None = None,
+) -> dict:
+    """Full NAMM training loss for one batch (Eqs. 1, 3, 4, 5 of Feng et al. 2025).
 
-    L = cycle_weight * L_cycle
-      + constraint_weight * L_constr
-      + reg_weight * L_reg
+    L_total = cycle_weight * L_cycle + constraint_weight * L_constr + reg_weight * R(g_phi)
 
-    Args:
-        g_phi:             Forward mirror map (ICNNGradient).
-        f_psi:             Inverse mirror map (InverseMap).
-        constraint_loss:   ConstraintLoss module.
-        x:                 (B, C, H, W) cloud-free Sentinel-2 batch.
-        max_sigma:         Max noise level for inverse map robustness training.
-        cycle_weight:      Weight for cycle-consistency loss.
-        constraint_weight: Weight for constraint distance loss.
-        reg_weight:        Weight for ICNN sparsity regularisation.
-        strong_convexity:  Strong-convexity coefficient alpha.
-        device:            Torch device.
-
-    Returns:
-        Dict with keys: loss, l_cycle, l_constr, l_reg, x_recon
-        where x_recon = f_psi(g_phi(x)) is the cycle reconstruction
-        (detached) — used by reconstruction_metrics() in the training
-        loop to compute MAE / SAM / PSNR / SSIM without a second
-        forward pass.
+    where
+        L_cycle  = E_x ||x - f_psi(g_phi(x))||_1
+                 + E_{x, sigma~U, z~N} ||y_noisy - g_phi(f_psi(y_noisy))||_1
+        L_constr = E_{x, sigma~U, z~N} [ ell_constr(f_psi(y_noisy)) ]
+        R        = E_x ||x - g_phi(x)||_1
     """
     B = x.shape[0]
     if device is None:
         device = x.device
 
     # ── Forward pass: x → mirror space ───────────────────────────────────────
-    y = g_phi(x)                         # (B, C, H, W) in mirror space
+    y = g_phi(x)                                    # (B, C, H, W)
 
-    # ── Cycle: x → y → x_hat → y_hat ────────────────────────────────────────
-    x_fwdbwd = f_psi(y)                  # should recover x
-    y_bwdfwd = g_phi(x_fwdbwd)          # should recover y
+    # ── Sample noisy mirror points (shared by cycle-backward and constraint) ─
+    sigmas = torch.rand(B, device=device) * max_sigma       # (B,)
+    z = torch.randn_like(y)
+    y_noisy = y + sigmas.view(B, 1, 1, 1) * z              # (B, C, H, W)
 
-    l_cycle_fwd = F.l1_loss(x_fwdbwd, x)
-    l_cycle_bwd = F.l1_loss(y_bwdfwd, y)
-    l_cyc = 0.5 * l_cycle_fwd + 0.5 * l_cycle_bwd
+    # ── Cycle loss (Eq. 3) ───────────────────────────────────────────────────
+    # Forward direction: x -> g_phi -> f_psi should recover x (clean)
+    x_recon = f_psi(y)
+    l_cycle_fwd = F.l1_loss(x_recon, x)
 
-    # ── Constraint loss: noisy mirror → inverse → constrained ────────────────
-    # Sample noise levels uniformly in [0, max_sigma]
-    sigmas = torch.rand(B, device=device) * max_sigma          # (B,)
-    noise  = torch.randn_like(y)
-    y_noisy = y + sigmas.view(B, 1, 1, 1) * noise             # perturbed mirror
+    # Backward direction: noisy y -> f_psi -> g_phi should recover noisy y
+    x_from_noisy = f_psi(y_noisy)
+    y_recon = g_phi(x_from_noisy)
+    l_cycle_bwd = F.l1_loss(y_recon, y_noisy)
 
-    x_hat = f_psi(y_noisy)                                     # restored image
-    l_c   = constraint_loss(x_hat, x)
+    l_cyc = l_cycle_fwd + l_cycle_bwd
 
-    # ── Regularisation: sparse ICNN (encourage sparse gradients of g_phi) ────
-    # grad_phi = (y - alpha * x) / (1 - alpha)  where alpha = strong_convexity
-    grad = (y.detach() - strong_convexity * x.detach()) / (1.0 - strong_convexity)
-    l_r  = grad.abs().mean()
+    # ── Constraint loss (Eq. 4) ──────────────────────────────────────────────
+    # Reuse x_from_noisy from above to avoid a second f_psi forward pass
+    constr_terms = constraint_loss.forward_terms(x_from_noisy, x)
+    l_c = constr_terms["loss"]
 
-    # ── Total loss ────────────────────────────────────────────────────────────
-    total = (cycle_weight * l_cyc
-             + constraint_weight * l_c
-             + reg_weight * l_r)
+    # ── Regularisation (Eq. 5): g_phi should be close to identity ────────────
+    l_r = F.l1_loss(y, x)
+
+    # ── Total loss ───────────────────────────────────────────────────────────
+    total = (
+        cycle_weight * l_cyc
+        + constraint_weight * l_c
+        + reg_weight * l_r
+    )
 
     return {
-        'loss':     total,
-        'l_cycle':  l_cyc.detach(),
-        'l_constr': l_c.detach(),
-        'l_reg':    l_r.detach(),
-        'x_recon':  x_fwdbwd.detach(),
+        "loss": total,
+        "l_cycle": l_cyc.detach(),
+        "l_constr": l_c.detach(),
+        "l_reg": l_r.detach(),
+        "x_recon": x_recon.detach(),
     }

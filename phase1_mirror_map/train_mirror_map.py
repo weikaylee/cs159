@@ -67,6 +67,8 @@ def get_args():
     p.add_argument('--max_sigma',    type=float, default=0.1,
                    help='Max noise level for inverse map robustness')
     p.add_argument('--style_weight', type=float, default=100.0)
+    p.add_argument('--sam_weight',   type=float, default=1.0)
+    p.add_argument('--moment_weight', type=float, default=1.0)
     p.add_argument('--cycle_weight', type=float, default=1.0)
     p.add_argument('--constr_weight',type=float, default=1.0)
     p.add_argument('--reg_weight',   type=float, default=0.001)
@@ -168,7 +170,6 @@ def validate(g_phi, f_psi, constraint_loss, val_loader, device, args):
             cycle_weight=args.cycle_weight,
             constraint_weight=args.constr_weight,
             reg_weight=args.reg_weight,
-            strong_convexity=args.strong_convexity,
             device=device,
         )
         metrics = reconstruction_metrics(losses['x_recon'], x)
@@ -232,6 +233,8 @@ def main():
     constraint_loss = ConstraintLoss(
         style_weight=args.style_weight,
         n_input_channels=args.n_channels,
+        sam_weight=args.sam_weight,
+        moment_weight=args.moment_weight,
     ).to(device)
 
     # ── Optimisers ───────────────────────────────────────────────────────────
@@ -275,7 +278,6 @@ def main():
                     cycle_weight=args.cycle_weight,
                     constraint_weight=args.constr_weight,
                     reg_weight=args.reg_weight,
-                    strong_convexity=args.strong_convexity,
                     device=device,
                 )
 
