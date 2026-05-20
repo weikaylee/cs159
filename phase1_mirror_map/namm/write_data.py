@@ -26,7 +26,7 @@ from polish import simulation
 parser = argparse.ArgumentParser()
 parser.add_argument(
   '-d', '--dataset', type=str, default=None,
-  choices=['riaf', 'burgers', 'kolmogorov', 'periodic', 'galaxies'])
+  choices=['riaf', 'burgers', 'kolmogorov', 'periodic', 'galaxies', 'sen12mscr'],)
 parser.add_argument(
   '-f', '--filetype', type=str, default='tfrecord',
   choices=['tfrecord', 'npy'])
@@ -47,6 +47,89 @@ parser.add_argument(
 
 _N_RIAF_SPIN_PARAMETERS = 101
 _N_RIAF_INCLINATION_PARAMETERS = 90
+
+# write_data.py — add this function alongside get_burgers_fns(), etc.
+
+import glob
+import rasterio  # or tifffile, or h5py depending on your file format
+
+def get_sen12ms_cr_fns(data_root: str):
+    """Load SEN12MS-CR patch triplets from disk.
+
+    SEN12MS-CR directory layout (typical):
+        <data_root>/
+            ROIs<season>/
+                S1/       # SAR, 2 bands, float32
+                S2_cloudy/  # cloudy optical, 13 bands
+                S2_cloudFree/  # target, 13 bands
+
+    Each patch: 256 x 256 pixels.
+
+    We pack each sample as a dict-style flat array with keys:
+        s2_cloudy:    (256, 256, 13) float32  — input (cloudy optical)
+        s2_cloudfree: (256, 256, 13) float32  — target (cloud-free)
+        s1:           (256, 256, 2)  float32  — SAR (optional conditioning)
+
+    For NAMM training, `image` = the cloud-free S2 patch (the constrained space).
+    """
+    # Gather all cloud-free patch paths
+    cf_paths = sorted(glob.glob(
+        os.path.join(data_root, '**', 'S2_cloudFree', '*.tif'), recursive=True))
+    # Build parallel lists for cloudy and SAR
+    def _cf_to_cloudy(p):
+        return p.replace('S2_cloudFree', 'S2_cloudy')
+    def _cf_to_s1(p):
+        return p.replace('S2_cloudFree', 'S1').replace('S2_', 'S1_')
+
+    def _read_patch(path, n_bands):
+        with rasterio.open(path) as src:
+            arr = src.read()          # (C, H, W)
+        arr = arr.transpose(1, 2, 0) # (H, W, C)
+        arr = arr[:256, :256, :n_bands].astype(np.float32)
+        return arr
+
+    def _normalize_s2(arr):
+        """Clip to [0, 10000] reflectance range and scale to [0, 1]."""
+        return np.clip(arr / 10000.0, 0.0, 1.0)
+
+    def _normalize_s1(arr):
+        """Log-scale SAR (dB), clip to [-25, 0] dB, scale to [0, 1]."""
+        arr = np.clip(arr, 1e-6, None)
+        arr_db = 10.0 * np.log10(arr)
+        return np.clip((arr_db + 25.0) / 25.0, 0.0, 1.0)
+
+    # Build a flat index once
+    index = list(range(len(cf_paths)))
+
+    def image_generating_fn(random_state):
+        """random_state is a numpy RandomState; we draw the next index from it."""
+        i = random_state.randint(0, len(cf_paths))
+        cf_path = cf_paths[i]
+        cloudy_path = _cf_to_cloudy(cf_path)
+
+        cf = _normalize_s2(_read_patch(cf_path, 13))        # (256, 256, 13)
+        cloudy = _normalize_s2(_read_patch(cloudy_path, 13))  # (256, 256, 13)
+
+        # For NAMM: we train the mirror map on cloud-FREE images.
+        # The cloudy image is the "corrupted" input used at inference.
+        # Return cloud-free as the primary image; pack both for tfrecord.
+        return {'cf': cf, 'cloudy': cloudy}
+
+    def tf_example(sample):
+        cf = sample['cf']       # (256, 256, 13)
+        cloudy = sample['cloudy']
+        h, w, c = cf.shape
+        features = tf.train.Features(feature={
+            'image':        tf.train.Feature(
+                float_list=tf.train.FloatList(value=cf.reshape(-1).tolist())),
+            'image_cloudy': tf.train.Feature(
+                float_list=tf.train.FloatList(value=cloudy.reshape(-1).tolist())),
+            'shape':        tf.train.Feature(
+                int64_list=tf.train.Int64List(value=[h, w, c])),
+        })
+        return tf.train.Example(features=features)
+
+    return image_generating_fn, tf_example
 
 
 def get_riaf_fns():
@@ -431,7 +514,9 @@ if __name__ == '__main__':
     # It would be nice to make the randomness reproducible.
     use_numpy_random_state = False
   elif args.dataset == "sen12mscr":
-    import glob, rasterio  # pip install rasterio
+    image_generating_fn, tf_example = get_sen12ms_cr_fns(args.data_root)
+    use_numpy_random_state = True
+    # import glob, rasterio  # pip install rasterio
     
     # ---------- download a subset ----------
     # SEN12MS-CR is hosted at: https://mediatum.ub.tum.de/1554803
@@ -444,62 +529,62 @@ if __name__ == '__main__':
     #       s2_cloudFree/
     #         ROIs1158_spring_s2_cloudFree_p*.tif
     
-    BANDS = [1, 2, 3, 7]   # B2(blue), B3(green), B4(red), B8(NIR) — 0-indexed
-    PATCH_SIZE = 64         # NAMM examples all use 64x64
+    # BANDS = [1, 2, 3, 7]   # B2(blue), B3(green), B4(red), B8(NIR) — 0-indexed
+    # PATCH_SIZE = 64         # NAMM examples all use 64x64
     
-    def load_sen12mscr_patches(root_dir, max_patches=None):
-        files = sorted(glob.glob(f"{root_dir}/**/s2_cloudFree/*.tif", recursive=True))
-        patches = []
-        for f in files:
-            with rasterio.open(f) as src:
-                img = src.read(indexes=[b+1 for b in BANDS])  # rasterio is 1-indexed
-                img = img.transpose(1, 2, 0).astype(np.float32)  # (H, W, C)
-                # Sentinel-2 L1C reflectance range is roughly 0-10000
-                img = np.clip(img / 10000.0, 0, 1)
-                # Tile into 64x64 patches
-                H, W, C = img.shape
-                for i in range(0, H - PATCH_SIZE + 1, PATCH_SIZE):
-                    for j in range(0, W - PATCH_SIZE + 1, PATCH_SIZE):
-                        patch = img[i:i+PATCH_SIZE, j:j+PATCH_SIZE, :]
-                        patches.append(patch)
-            if max_patches and len(patches) >= max_patches:
-                break
-        return np.array(patches[:max_patches])  # (N, 64, 64, 4)
+    # def load_sen12mscr_patches(root_dir, max_patches=None):
+    #     files = sorted(glob.glob(f"{root_dir}/**/s2_cloudFree/*.tif", recursive=True))
+    #     patches = []
+    #     for f in files:
+    #         with rasterio.open(f) as src:
+    #             img = src.read(indexes=[b+1 for b in BANDS])  # rasterio is 1-indexed
+    #             img = img.transpose(1, 2, 0).astype(np.float32)  # (H, W, C)
+    #             # Sentinel-2 L1C reflectance range is roughly 0-10000
+    #             img = np.clip(img / 10000.0, 0, 1)
+    #             # Tile into 64x64 patches
+    #             H, W, C = img.shape
+    #             for i in range(0, H - PATCH_SIZE + 1, PATCH_SIZE):
+    #                 for j in range(0, W - PATCH_SIZE + 1, PATCH_SIZE):
+    #                     patch = img[i:i+PATCH_SIZE, j:j+PATCH_SIZE, :]
+    #                     patches.append(patch)
+    #         if max_patches and len(patches) >= max_patches:
+    #             break
+    #     return np.array(patches[:max_patches])  # (N, 64, 64, 4)
     
-    all_patches = load_sen12mscr_patches(
-        args.data_dir, max_patches=args.n_train + args.n_test + args.n_val)
-    np.random.shuffle(all_patches)
-    splits = {
-        'train': all_patches[:args.n_train],
-        'test':  all_patches[args.n_train:args.n_train + args.n_test],
-        'val':   all_patches[args.n_train + args.n_test:],
-    }
+    # all_patches = load_sen12mscr_patches(
+    #     args.data_dir, max_patches=args.n_train + args.n_test + args.n_val)
+    # np.random.shuffle(all_patches)
+    # splits = {
+    #     'train': all_patches[:args.n_train],
+    #     'test':  all_patches[args.n_train:args.n_train + args.n_test],
+    #     'val':   all_patches[args.n_train + args.n_test:],
+    # }
     
-    # ---------- write TFRecords (same schema as existing datasets) ----------
-    for split_name, data in splits.items():
-        outpath = os.path.join(args.outdir, f'sen12mscr_{split_name}')
-        os.makedirs(outpath, exist_ok=True)
-        for shard_idx in range(0, len(data), args.n_per_shard):
-            shard = data[shard_idx:shard_idx + args.n_per_shard]
-            shard_file = os.path.join(outpath, f'{shard_idx:05d}.tfrecord')
-            with tf.io.TFRecordWriter(shard_file) as writer:
-                for img in shard:
-                    # Match the schema used by FFHQ/CelebAHQ in score_flow/datasets.py:
-                    # features: 'shape' (int64 x3) and 'data' (bytes)
-                    img_uint8 = (img * 255).astype(np.uint8)
-                    # store as (C, H, W) to match the existing decode logic
-                    img_chw = img_uint8.transpose(2, 0, 1)
-                    feature = {
-                        'shape': tf.train.Feature(
-                            int64_list=tf.train.Int64List(
-                                value=[img_chw.shape[0], img_chw.shape[1], img_chw.shape[2]])),
-                        'data': tf.train.Feature(
-                            bytes_list=tf.train.BytesList(value=[img_chw.tobytes()])),
-                    }
-                    writer.write(
-                        tf.train.Example(features=tf.train.Features(feature=feature))
-                        .SerializeToString())
-        print(f"Wrote {len(data)} patches for split '{split_name}' → {outpath}")
+    # # ---------- write TFRecords (same schema as existing datasets) ----------
+    # for split_name, data in splits.items():
+    #     outpath = os.path.join(args.outdir, f'sen12mscr_{split_name}')
+    #     os.makedirs(outpath, exist_ok=True)
+    #     for shard_idx in range(0, len(data), args.n_per_shard):
+    #         shard = data[shard_idx:shard_idx + args.n_per_shard]
+    #         shard_file = os.path.join(outpath, f'{shard_idx:05d}.tfrecord')
+    #         with tf.io.TFRecordWriter(shard_file) as writer:
+    #             for img in shard:
+    #                 # Match the schema used by FFHQ/CelebAHQ in score_flow/datasets.py:
+    #                 # features: 'shape' (int64 x3) and 'data' (bytes)
+    #                 img_uint8 = (img * 255).astype(np.uint8)
+    #                 # store as (C, H, W) to match the existing decode logic
+    #                 img_chw = img_uint8.transpose(2, 0, 1)
+    #                 feature = {
+    #                     'shape': tf.train.Feature(
+    #                         int64_list=tf.train.Int64List(
+    #                             value=[img_chw.shape[0], img_chw.shape[1], img_chw.shape[2]])),
+    #                     'data': tf.train.Feature(
+    #                         bytes_list=tf.train.BytesList(value=[img_chw.tobytes()])),
+    #                 }
+    #                 writer.write(
+    #                     tf.train.Example(features=tf.train.Features(feature=feature))
+    #                     .SerializeToString())
+    #     print(f"Wrote {len(data)} patches for split '{split_name}' → {outpath}")
 
   n_per_shard = args.n_per_shard
   filetype = args.filetype
