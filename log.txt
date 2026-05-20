@@ -48,4 +48,5 @@ for style representation, and conv42 for content representation. The weights are
 follows equations of amos et al (og icnn paper). but, doesn't follow implementation of tan et al which is what namm uses
 (ie doesn't include a "w_quad" term (to form W * x ^ 2), which is important in making forward map more curvy / "more convex")
 - so, new impl adds this term and more closely follows tan et al impl. see docstrings for sum notes too
-
+- updated inverse_map.py st it applies relu after residual (instead of other way around) to match namm impl
+- removed ema stuff from train_mirror_map.py. namm/train_namm.py doesn't use it, and idk why we'd have to use it xd

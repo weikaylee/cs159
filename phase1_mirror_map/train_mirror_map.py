@@ -72,7 +72,6 @@ def get_args():
     p.add_argument('--cycle_weight', type=float, default=1.0)
     p.add_argument('--constr_weight',type=float, default=1.0)
     p.add_argument('--reg_weight',   type=float, default=0.001)
-    p.add_argument('--ema_rate',     type=float, default=0.999)
 
     # Misc
     p.add_argument('--patch_size',   type=int, default=None,
@@ -95,48 +94,26 @@ def get_args():
     return p.parse_args()
 
 
-# ── EMA helper ────────────────────────────────────────────────────────────────
-
-class EMA:
-    def __init__(self, model: nn.Module, rate: float = 0.999):
-        self.rate = rate
-        self.shadow = {k: v.clone().detach()
-                       for k, v in model.state_dict().items()}
-
-    @torch.no_grad()
-    def update(self, model: nn.Module):
-        for k, v in model.state_dict().items():
-            self.shadow[k] = self.rate * self.shadow[k] + (1 - self.rate) * v
-
-    def apply(self, model: nn.Module):
-        model.load_state_dict(self.shadow)
-
-
 # ── Checkpoint helpers ────────────────────────────────────────────────────────
 
-def save_checkpoint(path, epoch, g_phi, f_psi, opt_g, opt_f,
-                    ema_g, ema_f, best_val_loss):
+def save_checkpoint(path, epoch, g_phi, f_psi, opt_g, opt_f, best_val_loss):
     torch.save({
         'epoch':         epoch,
         'g_phi':         g_phi.state_dict(),
         'f_psi':         f_psi.state_dict(),
         'opt_g':         opt_g.state_dict(),
         'opt_f':         opt_f.state_dict(),
-        'ema_g':         ema_g.shadow,
-        'ema_f':         ema_f.shadow,
         'best_val_loss': best_val_loss,
     }, path)
     print(f'  Saved checkpoint → {path}')
 
 
-def load_checkpoint(path, g_phi, f_psi, opt_g, opt_f, ema_g, ema_f):
+def load_checkpoint(path, g_phi, f_psi, opt_g, opt_f):
     ckpt = torch.load(path, map_location='cpu')
     g_phi.load_state_dict(ckpt['g_phi'])
     f_psi.load_state_dict(ckpt['f_psi'])
     opt_g.load_state_dict(ckpt['opt_g'])
     opt_f.load_state_dict(ckpt['opt_f'])
-    ema_g.shadow = ckpt['ema_g']
-    ema_f.shadow = ckpt['ema_f']
     print(f'  Resumed from epoch {ckpt["epoch"]} ({path})')
     return ckpt['epoch'], ckpt.get('best_val_loss', float('inf'))
 
@@ -242,9 +219,6 @@ def main():
     opt_g = torch.optim.Adam(g_phi.parameters(), lr=args.lr, betas=(0.5, 0.999))
     opt_f = torch.optim.Adam(f_psi.parameters(), lr=args.lr, betas=(0.5, 0.999))
 
-    ema_g = EMA(g_phi, rate=args.ema_rate)
-    ema_f = EMA(f_psi, rate=args.ema_rate)
-
     scaler = GradScaler(enabled=args.fp16)
 
     # ── Resume ───────────────────────────────────────────────────────────────
@@ -252,7 +226,7 @@ def main():
     best_val_loss = float('inf')
     if args.resume:
         start_epoch, best_val_loss = load_checkpoint(
-            args.resume, g_phi, f_psi, opt_g, opt_f, ema_g, ema_f)
+            args.resume, g_phi, f_psi, opt_g, opt_f)
 
     log_path = os.path.join(args.output_dir, 'history.csv')
 
@@ -289,9 +263,6 @@ def main():
             scaler.step(opt_g)
             scaler.step(opt_f)
             scaler.update()
-
-            ema_g.update(g_phi)
-            ema_f.update(f_psi)
 
             with torch.no_grad():
                 batch_metrics = reconstruction_metrics(losses['x_recon'], x)
@@ -373,14 +344,12 @@ def main():
             best_val_loss = val_loss
             save_checkpoint(
                 os.path.join(args.output_dir, 'best.pt'),
-                epoch + 1, g_phi, f_psi, opt_g, opt_f, ema_g, ema_f,
-                best_val_loss)
+                epoch + 1, g_phi, f_psi, opt_g, opt_f, best_val_loss)
 
         if epoch == args.epochs - 1:
             save_checkpoint(
                 os.path.join(args.output_dir, 'last.pt'),
-                epoch + 1, g_phi, f_psi, opt_g, opt_f, ema_g, ema_f,
-                best_val_loss)
+                epoch + 1, g_phi, f_psi, opt_g, opt_f, best_val_loss)
 
     if args.wandb:
         wandb.finish()
