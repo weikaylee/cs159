@@ -38,8 +38,19 @@ FTP_BASE = "ftp://m1554803:m1554803@dataserv.ub.tum.de"
 # (archive filename, extracted top-level directory).
 ARCHIVES = [
     ("ROIs1158_spring_s2.tar.gz",        "ROIs1158_spring_s2"),
-    ("ROIs1158_spring_s1.tar.gz",        "ROIs1158_spring_s1"),
+    ("ROIs1868_summer_s2.tar.gz",        "ROIs1868_summer_s2"),
+    ("ROIs1970_fall_s2.tar.gz",          "ROIs1970_fall_s2"),
+    ("ROIs2017_winter_s2.tar.gz",        "ROIs2017_winter_s2"),
+
     ("ROIs1158_spring_s2_cloudy.tar.gz", "ROIs1158_spring_s2_cloudy"),
+    ("ROIs1868_summer_s2_cloudy.tar.gz", "ROIs1868_summer_s2_cloudy"),
+    ("ROIs1970_fall_s2_cloudy.tar.gz",   "ROIs1970_fall_s2_cloudy"),
+    ("ROIs2017_winter_s2_cloudy.tar.gz", "ROIs2017_winter_s2_cloudy"),
+
+    ("ROIs1158_spring_s1.tar.gz",        "ROIs1158_spring_s1"),
+    ("ROIs1868_summer_s1.tar.gz",        "ROIs1868_summer_s1"),
+    ("ROIs1970_fall_s1.tar.gz",          "ROIs1970_fall_s1"),
+    ("ROIs2017_winter_s1.tar.gz",        "ROIs2017_winter_s1"),
 ]
 
 # tarfile gained a mandatory extraction filter in 3.12; pass it where
