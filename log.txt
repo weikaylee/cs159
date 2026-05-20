@@ -41,3 +41,11 @@ for style representation, and conv42 for content representation. The weights are
 - changed l_distr to use gaussian kernel as phi, as suggested by paper. see docstrings in losses.py for explanations (trusting claude on this one lol)
 - changed l_style to use correct normalization as defined in paper (before, was doing an extra square in gram matrix func)
 - changed namm_loss function to follow paper's equations; before, implemented smth hallucinated lowk
+
+5/19 verifying icnn 
+- see notes.txt for notes on what icnn is, why use icnn gradient as forward map, how exactly to enforce convexity, what implementation of icnn namm uses
+- original implemnentation of icnn.py is a mostly correct icnn implementation that
+follows equations of amos et al (og icnn paper). but, doesn't follow implementation of tan et al which is what namm uses
+(ie doesn't include a "w_quad" term (to form W * x ^ 2), which is important in making forward map more curvy / "more convex")
+- so, new impl adds this term and more closely follows tan et al impl. see docstrings for sum notes too
+
