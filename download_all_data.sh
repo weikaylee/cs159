@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH -J "download SEN12MS-CR dataset"   # job name
-#SBATCH --partition=regular          # Uses standard CPU nodes, much faster queue
+#SBATCH --partition=cpu          # Uses standard CPU nodes, much faster queue
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=2
