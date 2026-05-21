@@ -25,7 +25,7 @@
 CODE_DIR="/phase1_mirror_map/namm"   # TODO: absolute path to namm/
 DATA_ROOT="/data"                                  # TODO: SEN12MS-CR root on HPC
 OUTPUT_DIR="/scratch/${USER}/cs159/checkpoints/namm_sen12mscr"
-CONDA_ENV="resnick/groups/perona/oywang/conda_envs/namm"      # TODO: conda env name
+CONDA_ENV="/resnick/groups/perona/oywang/conda_envs/myenv"      # TODO: conda env name
 # ── END USER SETTINGS ──────────────────────────────────────────────────────
 
 set -euo pipefail
