@@ -22,9 +22,10 @@
 #SBATCH --mail-user=oywang@caltech.edu   # TODO: set your email
 
 # ── USER SETTINGS ──────────────────────────────────────────────────────────
-CODE_DIR="/phase1_mirror_map/namm"   # TODO: absolute path to namm/
-DATA_ROOT="/data"                                  # TODO: SEN12MS-CR root on HPC
-OUTPUT_DIR="/scratch/${USER}/cs159/checkpoints/namm_sen12mscr"
+CODE_DIR="/resnick/groups/perona/oywang/cs159/phase1_mirror_map/namm"
+   # TODO: absolute path to namm/
+DATA_ROOT="/resnick/groups/perona/oywang/cs159/data"                                  # TODO: SEN12MS-CR root on HPC
+OUTPUT_DIR="/scratch/oywang/cs159/checkpoints/namm_sen12mscr"
 CONDA_ENV="/resnick/groups/perona/oywang/conda_envs/myenv"      # TODO: conda env name
 # ── END USER SETTINGS ──────────────────────────────────────────────────────
 
