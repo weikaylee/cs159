@@ -582,6 +582,213 @@ def get_score_step_fn(sde, model, optimizer, namm, namm_state, train,
   return step_fn
 
 
+# ---------------------------------------------------------------------------
+# SEN12MSCR paired functions
+# ---------------------------------------------------------------------------
+
+def get_sen12mscr_constraint_losses_fn(config):
+    """Return a paired constraint function for SEN12MSCR cloud removal.
+
+    Unlike the per-dataset constraint functions above (which take only *x_hat*),
+    the returned callable takes ``(x_hat, x_ref)`` and returns both the scalar
+    per-example total loss **and** its three named components for logging::
+
+        total, c_recon, c_dis, c_style = constraint_losses_fn(y_bwd, x_clean)
+
+    All four outputs have shape ``(B,)``.
+    """
+    from sen_loss import FlaxVGGFeatureExtractor, l_recon, l_dis, l_style
+
+    style_weight = getattr(config.constraint, "style_weight", 100.0)
+    recon_weight = getattr(config.constraint, "recon_weight", 1.0)
+    dis_weight   = getattr(config.constraint, "dis_weight",   1.0)
+
+    vgg = FlaxVGGFeatureExtractor(n_input_channels=config.data.num_channels)
+    rng = jax.random.PRNGKey(0)
+    dummy = jnp.ones((1, config.data.height, config.data.width, config.data.num_channels))
+    vgg_params = vgg.init(rng, dummy)
+
+    def constraint_losses_fn(x_hat, x_ref):
+        x_hat = jnp.clip(x_hat, 0.0, 1.0)
+        feats_hat = vgg.apply(vgg_params, x_hat)
+        feats_ref = vgg.apply(vgg_params, x_ref)
+        c_recon = l_recon(x_hat, x_ref)
+        c_dis   = l_dis(feats_hat, feats_ref)
+        c_style = l_style(feats_hat, feats_ref)
+        total = recon_weight * c_recon + dis_weight * c_dis + style_weight * c_style
+        return total, c_recon, c_dis, c_style
+
+    return constraint_losses_fn
+
+
+def get_sen12mscr_namm_step_fn(
+    model,
+    fwd_tx,
+    bwd_tx,
+    constraint_losses_fn,
+    regularization: str = "fwdid",
+    train: bool = True,
+    max_sigma: float = 0.1,
+    fixed_sigma: bool = False,
+    fwd_strong_convexity: float = 1.0,
+):
+    """One-step training / evaluation function for paired SEN12MSCR data.
+
+    Differs from :func:`get_namm_step_fn` in two ways:
+
+    1. The step function signature is ``step_fn(carry_state, x, x_clean)``
+       where *x* is the cloudy image and *x_clean* is the cloud-free reference.
+    2. It calls ``constraint_losses_fn(y_bwd, x_clean)`` (two-argument form)
+       and returns the three individual loss components for logging.
+
+    Returns a ``step_fn(carry_state, x, x_clean)`` that returns::
+
+        (new_state, loss, loss_cycle, loss_constraint, loss_reg,
+         l_recon, l_dis, l_style,
+         x_fwd, x_fwdbwd, y, y_bwd, stds)
+    """
+
+    def loss_fn(
+        rng, fwd_params, bwd_params, x, x_clean,
+        cycle_weight, constraint_weight, regularization_weight,
+    ):
+        batch_size = x.shape[0]
+
+        rng, dropout_rng = jax.random.split(rng)
+        x_fwd = model.forward({"dropout": dropout_rng}, fwd_params, x, train=train)
+
+        rng, dropout_rng = jax.random.split(rng)
+        x_fwdbwd = model.backward({"dropout": dropout_rng}, bwd_params, x_fwd, train=train)
+
+        # Perturb mirror-space samples.
+        rng, noise_rng = jax.random.split(rng)
+        if fixed_sigma:
+            perturb_levels = jnp.ones(batch_size) * max_sigma
+        else:
+            perturb_levels = jax.random.uniform(
+                noise_rng, (batch_size,), minval=0.0, maxval=max_sigma
+            )
+        rng, noise_rng = jax.random.split(rng)
+        z = jax.random.normal(noise_rng, x.shape)
+        y = x_fwd + utils.batch_mul(perturb_levels, z)
+
+        rng, dropout_rng = jax.random.split(rng)
+        y_bwd = model.backward({"dropout": dropout_rng}, bwd_params, y, train=train)
+
+        rng, dropout_rng = jax.random.split(rng)
+        y_bwdfwd = model.forward({"dropout": dropout_rng}, fwd_params, y_bwd, train=train)
+
+        # Paired constraint: reconstruction of noisy mirror samples vs. clean reference.
+        losses_constraint, c_recon, c_dis, c_style = constraint_losses_fn(y_bwd, x_clean)
+        loss_constraint = jnp.mean(losses_constraint)
+
+        # Cycle-consistency.
+        loss_cycle_fwd = jnp.mean(jnp.abs(x_fwdbwd - x))
+        loss_cycle_bwd = jnp.mean(jnp.abs(y_bwdfwd - y))
+        loss_cycle = 0.5 * loss_cycle_fwd + 0.5 * loss_cycle_bwd
+
+        # Regularisation.
+        if regularization == "fwdid":
+            loss_reg = jnp.mean(jnp.abs(x_fwd - x))
+        elif regularization == "sparse_icnn":
+            grad = (x_fwd - fwd_strong_convexity * x) / (1.0 - fwd_strong_convexity)
+            loss_reg = jnp.mean(jnp.abs(grad))
+        else:
+            raise ValueError(f"Unknown regularization: {regularization!r}")
+
+        loss = (
+            cycle_weight * loss_cycle
+            + constraint_weight * loss_constraint
+            + regularization_weight * loss_reg
+        )
+
+        return loss, (
+            loss_cycle, loss_constraint, loss_reg,
+            jnp.mean(c_recon), jnp.mean(c_dis), jnp.mean(c_style),
+            x_fwd, x_fwdbwd, y, y_bwd, perturb_levels,
+        )
+
+    grad_fn = jax.value_and_grad(loss_fn, argnums=(1, 2), has_aux=True)
+
+    def step_fn(carry_state, x, x_clean):
+        (rng, state) = carry_state
+        rng, step_rng = jax.random.split(rng)
+
+        if train:
+            (loss, (
+                loss_cycle, loss_constraint, loss_reg,
+                l_recon_, l_dis_, l_style_,
+                x_fwd, x_fwdbwd, y, y_bwd, stds,
+            )), (fwd_grads, bwd_grads) = grad_fn(
+                step_rng,
+                state.fwd_params, state.bwd_params,
+                x, x_clean,
+                state.cycle_weight, state.constraint_weight,
+                state.regularization_weight,
+            )
+
+            loss          = jax.lax.pmean(loss,          axis_name="batch")
+            loss_cycle    = jax.lax.pmean(loss_cycle,    axis_name="batch")
+            loss_constraint = jax.lax.pmean(loss_constraint, axis_name="batch")
+            loss_reg      = jax.lax.pmean(loss_reg,      axis_name="batch")
+            l_recon_      = jax.lax.pmean(l_recon_,      axis_name="batch")
+            l_dis_        = jax.lax.pmean(l_dis_,        axis_name="batch")
+            l_style_      = jax.lax.pmean(l_style_,      axis_name="batch")
+            fwd_grads     = jax.lax.pmean(fwd_grads,     axis_name="batch")
+            bwd_grads     = jax.lax.pmean(bwd_grads,     axis_name="batch")
+
+            updates, new_fwd_opt_state = fwd_tx.update(
+                fwd_grads, state.fwd_opt_state, state.fwd_params
+            )
+            new_fwd_params = optax.apply_updates(state.fwd_params, updates)
+            new_fwd_params_ema = jax.tree_map(
+                lambda ema, p: ema * state.ema_rate + p * (1.0 - state.ema_rate),
+                state.fwd_params, new_fwd_params,
+            )
+
+            updates, new_bwd_opt_state = bwd_tx.update(
+                bwd_grads, state.bwd_opt_state, state.bwd_params
+            )
+            new_bwd_params = optax.apply_updates(state.bwd_params, updates)
+            new_bwd_params_ema = jax.tree_map(
+                lambda ema, p: ema * state.ema_rate + p * (1.0 - state.ema_rate),
+                state.bwd_params, new_bwd_params,
+            )
+
+            new_state = state.replace(
+                step=state.step + 1,
+                fwd_params=new_fwd_params,
+                bwd_params=new_bwd_params,
+                fwd_params_ema=new_fwd_params_ema,
+                bwd_params_ema=new_bwd_params_ema,
+                fwd_opt_state=new_fwd_opt_state,
+                bwd_opt_state=new_bwd_opt_state,
+                rng=rng,
+            )
+        else:
+            (loss, (
+                loss_cycle, loss_constraint, loss_reg,
+                l_recon_, l_dis_, l_style_,
+                x_fwd, x_fwdbwd, y, y_bwd, stds,
+            )), _ = grad_fn(
+                step_rng,
+                state.fwd_params_ema, state.bwd_params_ema,
+                x, x_clean,
+                state.cycle_weight, state.constraint_weight,
+                state.regularization_weight,
+            )
+            new_state = state
+
+        return (
+            new_state,
+            loss, loss_cycle, loss_constraint, loss_reg,
+            l_recon_, l_dis_, l_style_,
+            x_fwd, x_fwdbwd, y, y_bwd, stds,
+        )
+
+    return step_fn
+
+
 def get_mdm_sampling_fn(namm, sde_sampling_fn, apply_inverse=True):
     
   def mdm_sampling_fn(rng, score_state):
