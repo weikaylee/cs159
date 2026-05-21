@@ -51,16 +51,22 @@ class SEN12MSCRDataset(Dataset):
     Expected directory layout under *data_root*::
 
         {data_root}/
-        └── {season}/
-            ├── ROIs1158_{season}_s2/
-            │   └── s2_{id}/
-            │       └── ROIs1158_{season}_s2_{id}_p{patch}.tif
-            ├── ROIs1158_{season}_s2_cloudy/
-            │   └── s2_{id}/
-            │       └── ROIs1158_{season}_s2_cloudy_{id}_p{patch}.tif
-            └── ROIs1158_{season}_s1/
-                └── s1_{id}/
-                    └── ROIs1158_{season}_s1_{id}_p{patch}.tif
+        ├── ROIs1158_spring_s2/
+        │   └── s2_{id}/
+        │       └── ROIs1158_spring_s2_{id}_p{patch}.tif
+        ├── ROIs1158_spring_s2_cloudy/
+        │   └── s2_{id}/
+        │       └── ROIs1158_spring_s2_cloudy_{id}_p{patch}.tif
+        ├── ROIs1158_spring_s1/
+        │   └── s1_{id}/
+        │       └── ROIs1158_spring_s1_{id}_p{patch}.tif
+        ├── ROIs1868_summer_s2/    ...
+        ├── ROIs1970_fall_s2/      ...
+        └── ROIs2017_winter_s2/   ...
+
+    Season folders live **directly** under data_root (no intermediate
+    /{season}/ subdirectory).  The ROI number varies by season:
+    1158=spring, 1868=summer, 1970=fall, 2017=winter.
 
     Each .tif is a 256×256 multi-band GeoTIFF. Triplets are matched by
     (season, scene-id, patch-index).
@@ -76,8 +82,10 @@ class SEN12MSCRDataset(Dataset):
     ) -> None:
         """
         Args:
-            data_root:    Path to the root data directory (e.g. /data/).
-            seasons:      Seasons to include; None scans all sub-directories.
+            data_root:    Path to the root data directory containing the
+                          ROIs* subdirectories (e.g. /data/).
+            seasons:      Seasons to include (e.g. ["spring", "fall"]).
+                          None includes all seasons found.
             num_channels: Number of S2 bands to keep (leading bands). 13 = all;
                           4 = B2/B3/B4/B8 subset used by the default config.
                           # TODO: confirm band ordering in your tif files.
@@ -102,28 +110,40 @@ class SEN12MSCRDataset(Dataset):
     # ------------------------------------------------------------------
 
     def _build_index(self, seasons: Optional[List[str]]) -> List[Dict[str, str]]:
-        if seasons is None:
-            try:
-                seasons = [
-                    d for d in os.listdir(self.data_root)
-                    if os.path.isdir(os.path.join(self.data_root, d))
-                ]
-            except FileNotFoundError:
-                return []
+        """Scan data_root for ROIs*_s2 directories and match triplets.
 
+        The actual layout is flat — all ROIs* folders sit directly under
+        data_root with no intermediate season subdirectory.  The ROI
+        number is embedded in the folder name (e.g. ROIs1158_spring_s2).
+        """
+        try:
+            all_dirs = os.listdir(self.data_root)
+        except FileNotFoundError:
+            return []
+
+        # Find all cloud-free S2 root dirs; derive ROI number + season.
+        roi_re = re.compile(r'^ROIs(\d+)_(\w+)_s2$')
         triplets: List[Dict[str, str]] = []
-        for season in seasons:
-            season_dir = os.path.join(self.data_root, season)
-            clean_root  = os.path.join(season_dir, f"ROIs1158_{season}_s2")
-            cloudy_root = os.path.join(season_dir, f"ROIs1158_{season}_s2_cloudy")
-            sar_root    = os.path.join(season_dir, f"ROIs1158_{season}_s1")
+
+        for d in sorted(all_dirs):
+            m = roi_re.match(d)
+            if not m:
+                continue
+            roi_num, season = m.group(1), m.group(2)
+
+            if seasons is not None and season not in seasons:
+                continue
+
+            clean_root  = os.path.join(self.data_root, f"ROIs{roi_num}_{season}_s2")
+            cloudy_root = os.path.join(self.data_root, f"ROIs{roi_num}_{season}_s2_cloudy")
+            sar_root    = os.path.join(self.data_root, f"ROIs{roi_num}_{season}_s1")
 
             if not all(os.path.isdir(p) for p in [clean_root, cloudy_root, sar_root]):
                 continue
 
-            clean_idx  = self._index_dir(clean_root,  season, "s2")
-            cloudy_idx = self._index_dir(cloudy_root, season, "s2_cloudy")
-            sar_idx    = self._index_dir(sar_root,    season, "s1")
+            clean_idx  = self._index_dir(clean_root,  roi_num, season, "s2")
+            cloudy_idx = self._index_dir(cloudy_root, roi_num, season, "s2_cloudy")
+            sar_idx    = self._index_dir(sar_root,    roi_num, season, "s1")
 
             for key in clean_idx:
                 if key in cloudy_idx and key in sar_idx:
@@ -137,16 +157,17 @@ class SEN12MSCRDataset(Dataset):
 
     @staticmethod
     def _index_dir(
-        root: str, season: str, modality: str
+        root: str, roi_num: str, season: str, modality: str
     ) -> Dict[Tuple[str, str], str]:
-        """Return {(scene_id, patch_id): path} for all .tif files under *root*."""
-        pattern = os.path.join(root, "**", "*.tif")
+        """Return {(scene_id, patch_id): path} for all .tif files under *root*.
+
+        Filename pattern: ROIs{roi_num}_{season}_{modality}_{id}_p{patch}.tif
+        """
         index: Dict[Tuple[str, str], str] = {}
-        # Filename pattern: ROIs1158_{season}_{modality}_{id}_p{patch}.tif
         re_pat = re.compile(
-            rf"ROIs1158_{re.escape(season)}_{re.escape(modality)}_(\d+)_p(\d+)\.tif$"
+            rf"ROIs{roi_num}_{re.escape(season)}_{re.escape(modality)}_(\d+)_p(\d+)\.tif$"
         )
-        for path in glob.glob(pattern, recursive=True):
+        for path in glob.glob(os.path.join(root, "**", "*.tif"), recursive=True):
             m = re_pat.search(os.path.basename(path))
             if m:
                 index[(m.group(1), m.group(2))] = path
