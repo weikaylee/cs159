@@ -44,6 +44,10 @@ _WANDB_RUN_NAME = flags.DEFINE_string(
   'wandb_run_name', None, 'Wandb run name.')
 _WANDB_ENTITY = flags.DEFINE_string(
   'wandb_entity', None, 'Wandb entity / team.')
+_WANDB_MODE = flags.DEFINE_string(
+  'wandb_mode', 'online',
+  'Wandb mode: "online" (default), "offline" (no internet needed, sync later), '
+  'or "disabled".')
 
 
 def get_workdir():
@@ -170,6 +174,7 @@ def _run_sen12mscr_training(config, workdir, progress_dir, ckpt_mgr,
           name=_WANDB_RUN_NAME.value,
           entity=_WANDB_ENTITY.value,
           config=config.to_dict(),
+          mode=_WANDB_MODE.value,
       )
 
   for epoch in range(state.epoch, config.training.n_epochs):
