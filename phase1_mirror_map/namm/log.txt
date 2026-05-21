@@ -1,0 +1,105 @@
+## What was built (2026-05-20)
+
+Goal: Train the NAMM mirror-map model on SEN12MS-CR using a custom
+      spectral loss (reconstruction + style + distribution).
+
+### New files
+
+datasets/__init__.py
+    Package marker for the new datasets sub-package.
+
+datasets/sen12mscr.py
+    SEN12MSCRDataset  — PyTorch Dataset that scans all seasons under
+    data_root, matches (cloudy S2, cloud-free S2, S1 SAR) triplets by
+    (season, scene-id, patch-index), reads .tif files via rasterio or
+    tifffile, normalises S2 by /10000 and S1 dB by linear clamp to
+    [0, 1], and supports optional random spatial crops.
+    get_dataloader()  — factory with configurable split / batch_size /
+    num_workers / patch_size / seasons.
+    jax_iter()        — bridge that converts PyTorch (B, C, H, W)
+    batches to numpy arrays shaped (n_devices, per_device_batch, H, W, C)
+    for direct consumption by jax.pmap.
+
+configs/sen12mscr_config.py
+    Full ml_collections config for SEN12MSCR training:
+      data.dataset = "sen12mscr", data.height/width = 64,
+      data.num_channels = 13, data.patch_size = 64,
+      constraint.type = "sen12mscr",
+      constraint.style_weight = 100.0,
+      optim.regularization = "fwdid", and all standard NAMM fields.
+
+scripts/train_sen12mscr.sh
+    SLURM job script (4x GPU, 48h wall-clock, editable placeholders for
+    partition, email, CODE_DIR, DATA_ROOT, OUTPUT_DIR, CONDA_ENV).
+
+scripts/verify_dataset.py
+    Standalone sanity-check (no GPU required):
+      - indexes all triplets and prints counts per split
+      - reports tensor shapes, dtypes, per-band min/max/mean
+      - flags values outside [0, 1]
+      - times one full training epoch
+
+### Modified files
+
+losses.py
+    get_sen12mscr_constraint_losses_fn(config)
+        Initialises a frozen Flax VGG feature extractor and returns a
+        paired constraint function  (x_hat, x_ref) -> (total, c_recon,
+        c_dis, c_style)  where all outputs have shape (B,).
+        Weights: recon_weight * l_recon + dis_weight * l_dis +
+                 style_weight * l_style.
+    get_sen12mscr_namm_step_fn(...)
+        Paired one-step train/eval function.  Signature:
+          step_fn(carry_state, x_cloudy, x_clean)
+        Calls constraint_losses_fn(y_bwd, x_clean) and returns
+        (new_state, loss, loss_cycle, loss_constraint, loss_reg,
+         l_recon, l_dis, l_style, x_fwd, x_fwdbwd, y, y_bwd, stds).
+        All three constraint components are synced across devices via
+        jax.lax.pmean and returned for per-step logging.
+
+train_namm.py
+    --data_root flag
+        Overrides config.data.data_root at launch time.
+    TF data loading guarded
+        datasets.get_dataset() is skipped when
+        config.data.dataset == "sen12mscr".
+    _run_sen12mscr_training(config, workdir, progress_dir, ckpt_mgr,
+                            model, state, fwd_tx, bwd_tx)
+        Self-contained training loop for paired data.  Uses
+        get_dataloader + jax_iter for data, get_sen12mscr_namm_step_fn
+        for updates, and saves seven extra .npy curve files
+        (losses_recon, losses_dis, losses_style + val equivalents) in
+        addition to the standard four.  Log lines include all three
+        constraint components per step.
+    Early-return branch in main()
+        After model init + checkpoint restore, main() calls
+        _run_sen12mscr_training and returns if
+        config.data.dataset == "sen12mscr".
+
+### TODOs left in code
+
+datasets/sen12mscr.py
+    - S1 dB normalisation range assumed [-25, 0]; verify against archive.
+    - S2 band ordering assumed B1..B13 leading; adjust slice if needed.
+
+configs/sen12mscr_config.py
+    - data.num_channels = 13 (all bands); set to 4 for B2/B3/B4/B8 only.
+
+scripts/train_sen12mscr.sh
+    - Set --partition, --mail-user, CODE_DIR, DATA_ROOT, OUTPUT_DIR,
+      CONDA_ENV before submitting.
+
+### How to use
+
+Verify data (no GPU):
+    cd phase1_mirror_map/namm
+    python scripts/verify_dataset.py --data_root /data/
+
+Train on HPC:
+    sbatch scripts/train_sen12mscr.sh
+    # or directly:
+    python train_namm.py \
+        --config configs/sen12mscr_config.py \
+        --data_root /data/ \
+        --workdir /scratch/$USER/cs159/checkpoints/namm_sen12mscr
+w
