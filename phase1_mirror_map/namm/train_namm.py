@@ -18,6 +18,7 @@ import model_utils as namm_mutils
 import vis
 from score_flow import datasets
 from score_flow import utils
+from datasets.sen12mscr import get_dataloader, jax_iter
 
 
 _CONFIG = config_flags.DEFINE_config_file('config', None, 'NAMM config.')
@@ -29,6 +30,10 @@ _CONSTRAINT_WEIGHT = flags.DEFINE_float(
   'constraint_weight', None, 'Weight of the constraint loss during finetuning.')
 _MDM_DATASET = flags.DEFINE_string(
   'mdm_dataset', None, "Name of the MDM dataset (e.g., 'mdm_kolmogorov').")
+_DATA_ROOT = flags.DEFINE_string(
+  'data_root', None,
+  'Root directory of the SEN12MS-CR dataset (e.g. /data/). '
+  'Overrides config.data.data_root when provided.')
 
 
 def get_workdir():
@@ -71,9 +76,211 @@ def get_workdir():
   return workdir, orig_workdir
 
 
+def _run_sen12mscr_training(config, workdir, progress_dir, ckpt_mgr,
+                            model, state, fwd_tx, bwd_tx):
+  """Full training loop for paired SEN12MSCR cloud-removal data.
+
+  Uses the PyTorch DataLoader (datasets.sen12mscr) and the paired
+  get_sen12mscr_namm_step_fn.  Individual constraint components
+  (reconstruction, distribution, style) are tracked alongside the
+  aggregate losses in separate .npy curve files.
+  """
+  data_root        = getattr(config.data, 'data_root', '/data/')
+  batch_size       = config.training.batch_size
+  n_devices        = jax.local_device_count()
+  per_device_batch = batch_size // n_devices
+  patch_size       = int(getattr(config.data, 'patch_size', config.data.height))
+  num_workers      = int(getattr(config.data, 'num_workers', 4))
+
+  train_loader = get_dataloader(
+      data_root, split='train', batch_size=batch_size,
+      num_workers=num_workers, shuffle=True,
+      num_channels=config.data.num_channels, patch_size=patch_size)
+  val_loader = get_dataloader(
+      data_root, split='val', batch_size=batch_size,
+      num_workers=num_workers, shuffle=False,
+      num_channels=config.data.num_channels, patch_size=patch_size)
+
+  constraint_fn = losses.get_sen12mscr_constraint_losses_fn(config)
+  step_fn = losses.get_sen12mscr_namm_step_fn(
+      model, fwd_tx, bwd_tx, constraint_fn,
+      regularization=config.optim.regularization,
+      train=True,
+      max_sigma=config.optim.max_sigma,
+      fixed_sigma=config.optim.fixed_sigma,
+      fwd_strong_convexity=config.model.fwd_strong_convexity)
+  eval_fn = losses.get_sen12mscr_namm_step_fn(
+      model, fwd_tx, bwd_tx, constraint_fn,
+      regularization=config.optim.regularization,
+      train=False,
+      max_sigma=config.optim.max_sigma,
+      fixed_sigma=config.optim.fixed_sigma,
+      fwd_strong_convexity=config.model.fwd_strong_convexity)
+  pstep_fn = jax.pmap(jax.jit(step_fn), axis_name='batch', donate_argnums=(1, 2))
+  peval_fn = jax.pmap(jax.jit(eval_fn), axis_name='batch', donate_argnums=(1, 2))
+
+  # Restore loss-curve accumulators if present.
+  cp = lambda name: os.path.join(progress_dir, f'{name}.npy')
+  if os.path.exists(cp('losses_total')):
+    epoch_times           = list(np.load(cp('epoch_times')))
+    losses_total          = list(np.load(cp('losses_total')))
+    losses_cycle          = list(np.load(cp('losses_cycle')))
+    losses_constraint     = list(np.load(cp('losses_constraint')))
+    losses_reg            = list(np.load(cp('losses_reg')))
+    losses_recon          = list(np.load(cp('losses_recon')))
+    losses_dis            = list(np.load(cp('losses_dis')))
+    losses_style          = list(np.load(cp('losses_style')))
+    val_losses_total      = list(np.load(cp('val_losses_total')))
+    val_losses_cycle      = list(np.load(cp('val_losses_cycle')))
+    val_losses_constraint = list(np.load(cp('val_losses_constraint')))
+    val_losses_reg        = list(np.load(cp('val_losses_reg')))
+    val_losses_recon      = list(np.load(cp('val_losses_recon')))
+    val_losses_dis        = list(np.load(cp('val_losses_dis')))
+    val_losses_style      = list(np.load(cp('val_losses_style')))
+  else:
+    epoch_times = []
+    losses_total, losses_cycle, losses_constraint, losses_reg = [], [], [], []
+    losses_recon, losses_dis, losses_style = [], [], []
+    val_losses_total, val_losses_cycle = [], []
+    val_losses_constraint, val_losses_reg = [], []
+    val_losses_recon, val_losses_dis, val_losses_style = [], [], []
+
+  pstate = flax.jax_utils.replicate(state)
+  rng = jax.random.fold_in(state.rng, jax.process_index())
+
+  if utils.is_coordinator():
+    logging.info(
+        'SEN12MSCR: %d train / %d val triplets',
+        len(train_loader.dataset), len(val_loader.dataset))
+    logging.info(
+        'Starting training at epoch %d (step %d)', state.epoch, state.step)
+
+  for epoch in range(state.epoch, config.training.n_epochs):
+
+    # Training.
+    ep_loss, ep_cycle, ep_constr, ep_reg = [], [], [], []
+    ep_recon, ep_dis, ep_style = [], [], []
+    epoch_time = 0.0
+    for step, item in enumerate(jax_iter(train_loader, n_devices, per_device_batch)):
+      s = time.perf_counter()
+      batch       = item['image']    # (n_dev, per_dev_bs, H, W, C)
+      batch_clean = item['target']
+
+      rng, step_rngs = utils.psplit(rng)
+      (pstate,
+       ploss, ploss_cycle, ploss_constr, ploss_reg,
+       ploss_recon, ploss_dis, ploss_style,
+       x_fwd, x_fwdbwd, y, y_bwd, stds) = pstep_fn(
+          (step_rngs, pstate), batch, batch_clean)
+
+      loss   = flax.jax_utils.unreplicate(ploss).item()
+      cycle  = flax.jax_utils.unreplicate(ploss_cycle).item()
+      constr = flax.jax_utils.unreplicate(ploss_constr).item()
+      reg    = flax.jax_utils.unreplicate(ploss_reg).item()
+      recon  = flax.jax_utils.unreplicate(ploss_recon).item()
+      dis    = flax.jax_utils.unreplicate(ploss_dis).item()
+      style  = flax.jax_utils.unreplicate(ploss_style).item()
+
+      t = time.perf_counter() - s
+      epoch_time += t
+      ep_loss.append(loss);   ep_cycle.append(cycle)
+      ep_constr.append(constr); ep_reg.append(reg)
+      ep_recon.append(recon); ep_dis.append(dis); ep_style.append(style)
+
+      if ((step + 1) % config.training.log_freq == 0) and utils.is_coordinator():
+        logging.info(
+            '[epoch %03d, step %03d] %.3fs  '
+            'loss=%.4e  cycle=%.4e  constr=%.4e '
+            '(recon=%.4e  dis=%.4e  style=%.4e)  reg=%.4e',
+            epoch, step + 1, t, loss, cycle, constr, recon, dis, style, reg)
+
+    epoch_times.append(epoch_time)
+    losses_total.append(np.mean(ep_loss))
+    losses_cycle.append(np.mean(ep_cycle))
+    losses_constraint.append(np.mean(ep_constr))
+    losses_reg.append(np.mean(ep_reg))
+    losses_recon.append(np.mean(ep_recon))
+    losses_dis.append(np.mean(ep_dis))
+    losses_style.append(np.mean(ep_style))
+
+    # Validation.
+    val_ep_loss, val_ep_cycle, val_ep_constr, val_ep_reg = [], [], [], []
+    val_ep_recon, val_ep_dis, val_ep_style = [], [], []
+    for step, item in enumerate(jax_iter(val_loader, n_devices, per_device_batch)):
+      s = time.perf_counter()
+      val_batch       = item['image']
+      val_batch_clean = item['target']
+
+      rng, next_rngs = utils.psplit(rng)
+      (_, val_ploss, val_ploss_cycle, val_ploss_constr, val_ploss_reg,
+       val_ploss_recon, val_ploss_dis, val_ploss_style,
+       _, _, _, _, _) = peval_fn(
+          (next_rngs, pstate), val_batch, val_batch_clean)
+
+      val_loss   = flax.jax_utils.unreplicate(val_ploss).item()
+      val_cycle  = flax.jax_utils.unreplicate(val_ploss_cycle).item()
+      val_constr = flax.jax_utils.unreplicate(val_ploss_constr).item()
+      val_reg    = flax.jax_utils.unreplicate(val_ploss_reg).item()
+      val_recon  = flax.jax_utils.unreplicate(val_ploss_recon).item()
+      val_dis    = flax.jax_utils.unreplicate(val_ploss_dis).item()
+      val_style  = flax.jax_utils.unreplicate(val_ploss_style).item()
+
+      val_ep_loss.append(val_loss);     val_ep_cycle.append(val_cycle)
+      val_ep_constr.append(val_constr); val_ep_reg.append(val_reg)
+      val_ep_recon.append(val_recon);   val_ep_dis.append(val_dis)
+      val_ep_style.append(val_style)
+
+      if (step == 0 or (step + 1) % config.training.log_freq == 0) and utils.is_coordinator():
+        t = time.perf_counter() - s
+        logging.info(
+            '[epoch %03d, step %03d] %.3fs  val_loss=%.4e  '
+            '(recon=%.4e  dis=%.4e  style=%.4e)',
+            epoch, step + 1, t, val_loss, val_recon, val_dis, val_style)
+
+    val_losses_total.append(np.mean(val_ep_loss))
+    val_losses_cycle.append(np.mean(val_ep_cycle))
+    val_losses_constraint.append(np.mean(val_ep_constr))
+    val_losses_reg.append(np.mean(val_ep_reg))
+    val_losses_recon.append(np.mean(val_ep_recon))
+    val_losses_dis.append(np.mean(val_ep_dis))
+    val_losses_style.append(np.mean(val_ep_style))
+
+    # Save progress snapshot.
+    if ((epoch + 1) % config.training.snapshot_epoch_freq == 0
+        and utils.is_coordinator()):
+      np.save(cp('epoch_times'),           epoch_times)
+      np.save(cp('losses_total'),          losses_total)
+      np.save(cp('losses_cycle'),          losses_cycle)
+      np.save(cp('losses_constraint'),     losses_constraint)
+      np.save(cp('losses_reg'),            losses_reg)
+      np.save(cp('losses_recon'),          losses_recon)
+      np.save(cp('losses_dis'),            losses_dis)
+      np.save(cp('losses_style'),          losses_style)
+      np.save(cp('val_losses_total'),      val_losses_total)
+      np.save(cp('val_losses_cycle'),      val_losses_cycle)
+      np.save(cp('val_losses_constraint'), val_losses_constraint)
+      np.save(cp('val_losses_reg'),        val_losses_reg)
+      np.save(cp('val_losses_recon'),      val_losses_recon)
+      np.save(cp('val_losses_dis'),        val_losses_dis)
+      np.save(cp('val_losses_style'),      val_losses_style)
+
+    # Save checkpoint.
+    if ((epoch + 1) % config.training.ckpt_epoch_freq == 0
+        and utils.is_coordinator()):
+      state_to_save = flax.jax_utils.unreplicate(pstate)
+      state_to_save = state_to_save.replace(epoch=epoch + 1)
+      ckpt_mgr.save(epoch + 1, args=ocp.args.StandardSave(state_to_save))
+
+  ckpt_mgr.wait_until_finished()
+
+
 def main(_):
   config = _CONFIG.value
   finetune = _FINETUNE.value
+
+  # Apply --data_root override before any data loading.
+  if _DATA_ROOT.value is not None:
+    config.data.data_root = _DATA_ROOT.value
 
   # Create working directory and its subdirectories.
   workdir, orig_workdir = get_workdir()
@@ -91,18 +298,19 @@ def main(_):
   # Create checkpoint manager.
   ckpt_mgr = ocp.CheckpointManager(ckpt_dir)
 
-  # Get data.
-  train_ds, val_ds, _ = datasets.get_dataset(
-    config, additional_dim=None,
-    uniform_dequantization=config.data.uniform_dequantization)
-
-  if finetune:
-    mdm_train_ds, mdm_val_ds, _ = datasets.get_dataset(
+  # Get data.  (SEN12MSCR uses a PyTorch DataLoader; handled in _run_sen12mscr_training.)
+  if config.data.dataset != 'sen12mscr':
+    train_ds, val_ds, _ = datasets.get_dataset(
       config, additional_dim=None,
-      uniform_dequantization=config.data.uniform_dequantization,
-      dataset_name=_MDM_DATASET.value)
-    train_ds = tf.data.Dataset.zip((train_ds, mdm_train_ds))
-    val_ds = tf.data.Dataset.zip((val_ds, mdm_val_ds))
+      uniform_dequantization=config.data.uniform_dequantization)
+
+    if finetune:
+      mdm_train_ds, mdm_val_ds, _ = datasets.get_dataset(
+        config, additional_dim=None,
+        uniform_dequantization=config.data.uniform_dequantization,
+        dataset_name=_MDM_DATASET.value)
+      train_ds = tf.data.Dataset.zip((train_ds, mdm_train_ds))
+      val_ds = tf.data.Dataset.zip((val_ds, mdm_val_ds))
 
   if finetune:
     config.optim.max_sigma = _MAX_SIGMA.value
@@ -132,6 +340,12 @@ def main(_):
     if latest_epoch is not None:
       state = ckpt_mgr.restore(latest_epoch, args=ocp.args.StandardRestore(state))
       logging.info('Loaded checkpoint from epoch %d', latest_epoch)
+  # SEN12MSCR: hand off to the dedicated paired training loop and return.
+  if config.data.dataset == 'sen12mscr':
+    _run_sen12mscr_training(
+        config, workdir, progress_dir, ckpt_mgr, model, state, fwd_tx, bwd_tx)
+    return
+
   if os.path.exists(os.path.join(progress_dir, 'losses_total.npy')):
     epoch_times = list(np.load(os.path.join(progress_dir, 'epoch_times.npy')))
     losses_total = list(np.load(os.path.join(progress_dir, 'losses_total.npy')))
