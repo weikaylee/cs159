@@ -13,6 +13,8 @@ import orbax.checkpoint as ocp
 import tensorflow as tf
 tf.config.experimental.set_visible_devices([], 'GPU')  # use CPU-only
 
+import wandb
+
 import losses
 import model_utils as namm_mutils
 import vis
@@ -34,6 +36,14 @@ _DATA_ROOT = flags.DEFINE_string(
   'data_root', None,
   'Root directory of the SEN12MS-CR dataset (e.g. /data/). '
   'Overrides config.data.data_root when provided.')
+_WANDB = flags.DEFINE_bool(
+  'wandb', False, 'Stream metrics to Weights & Biases.')
+_WANDB_PROJECT = flags.DEFINE_string(
+  'wandb_project', 'cs159', 'Wandb project name.')
+_WANDB_RUN_NAME = flags.DEFINE_string(
+  'wandb_run_name', None, 'Wandb run name.')
+_WANDB_ENTITY = flags.DEFINE_string(
+  'wandb_entity', None, 'Wandb entity / team.')
 
 
 def get_workdir():
@@ -154,6 +164,13 @@ def _run_sen12mscr_training(config, workdir, progress_dir, ckpt_mgr,
         len(train_loader.dataset), len(val_loader.dataset))
     logging.info(
         'Starting training at epoch %d (step %d)', state.epoch, state.step)
+    if _WANDB.value:
+      wandb.init(
+          project=_WANDB_PROJECT.value,
+          name=_WANDB_RUN_NAME.value,
+          entity=_WANDB_ENTITY.value,
+          config=config.to_dict(),
+      )
 
   for epoch in range(state.epoch, config.training.n_epochs):
 
@@ -203,6 +220,18 @@ def _run_sen12mscr_training(config, workdir, progress_dir, ckpt_mgr,
     losses_dis.append(np.mean(ep_dis))
     losses_style.append(np.mean(ep_style))
 
+    if _WANDB.value and utils.is_coordinator():
+      wandb.log({
+          'train/loss':       losses_total[-1],
+          'train/l_cycle':    losses_cycle[-1],
+          'train/l_constr':   losses_constraint[-1],
+          'train/l_reg':      losses_reg[-1],
+          'train/l_recon':    losses_recon[-1],
+          'train/l_dis':      losses_dis[-1],
+          'train/l_style':    losses_style[-1],
+          'train/epoch':      epoch + 1,
+      }, step=epoch + 1)
+
     # Validation.
     val_ep_loss, val_ep_cycle, val_ep_constr, val_ep_reg = [], [], [], []
     val_ep_recon, val_ep_dis, val_ep_style = [], [], []
@@ -245,6 +274,18 @@ def _run_sen12mscr_training(config, workdir, progress_dir, ckpt_mgr,
     val_losses_dis.append(np.mean(val_ep_dis))
     val_losses_style.append(np.mean(val_ep_style))
 
+    if _WANDB.value and utils.is_coordinator():
+      wandb.log({
+          'val/loss':       val_losses_total[-1],
+          'val/l_cycle':    val_losses_cycle[-1],
+          'val/l_constr':   val_losses_constraint[-1],
+          'val/l_reg':      val_losses_reg[-1],
+          'val/l_recon':    val_losses_recon[-1],
+          'val/l_dis':      val_losses_dis[-1],
+          'val/l_style':    val_losses_style[-1],
+          'val/best_loss':  min(val_losses_total),
+      }, step=epoch + 1)
+
     # Save progress snapshot.
     if ((epoch + 1) % config.training.snapshot_epoch_freq == 0
         and utils.is_coordinator()):
@@ -272,6 +313,9 @@ def _run_sen12mscr_training(config, workdir, progress_dir, ckpt_mgr,
       ckpt_mgr.save(epoch + 1, args=ocp.args.StandardSave(state_to_save))
 
   ckpt_mgr.wait_until_finished()
+
+  if _WANDB.value and utils.is_coordinator():
+    wandb.finish()
 
 
 def main(_):
