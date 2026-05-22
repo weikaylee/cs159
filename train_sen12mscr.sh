@@ -45,12 +45,11 @@ export HF_HOME=/resnick/groups/perona/oywang/.cache/huggingface
 export TORCH_HOME=/resnick/groups/perona/oywang/.cache/torch
 export PIP_CACHE_DIR=/resnick/groups/perona/oywang/.cache/pip
 
-# Expose the pip-installed cuDNN 8.9 so PyTorch can find libcudnn.so.8.
-# nvidia-cudnn-cu12 installs the .so into site-packages/nvidia/cudnn/lib/.
+# Expose cuDNN 9 (for JAX GPU) and cuDNN 8 (for PyTorch import).
+# libcudnn.so.9 and libcudnn.so.8 have different sonames so they coexist.
+CUDNN9_LIB="/resnick/groups/perona/oywang/cudnn9/lib"
 CUDNN8_LIB="${CONDA_ENV}/lib/python3.10/site-packages/nvidia/cudnn/lib"
-if [ -d "${CUDNN8_LIB}" ]; then
-    export LD_LIBRARY_PATH="${CUDNN8_LIB}:${LD_LIBRARY_PATH:-}"
-fi
+export LD_LIBRARY_PATH="${CUDNN9_LIB}:${CUDNN8_LIB}:${LD_LIBRARY_PATH:-}"
 
 mkdir -p "${OUTPUT_DIR}" logs
 
@@ -64,6 +63,14 @@ echo "  Data root:  ${DATA_ROOT}"
 echo "  Output dir: ${OUTPUT_DIR}"
 echo "  Start:      $(date)"
 echo "===================="
+nvidia-smi --query-gpu=name,memory.total --format=csv,noheader 2>/dev/null || echo "  nvidia-smi: no GPU visible"
+python -c "
+import jax
+try:
+    print('JAX devices:', jax.devices())
+except Exception as e:
+    print('JAX devices error:', e)
+"
 
 python train_namm.py \
     --config                  configs/sen12mscr_config.py \

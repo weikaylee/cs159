@@ -44,11 +44,10 @@ export HF_HOME=/resnick/groups/perona/oywang/.cache/huggingface
 export TORCH_HOME=/resnick/groups/perona/oywang/.cache/torch
 export PIP_CACHE_DIR=/resnick/groups/perona/oywang/.cache/pip
 
-# Expose the pip-installed cuDNN 8.9 so PyTorch can find libcudnn.so.8.
+# Expose cuDNN 9 (for JAX/eval GPU) and cuDNN 8 (for PyTorch import).
+CUDNN9_LIB="/resnick/groups/perona/oywang/cudnn9/lib"
 CUDNN8_LIB="${CONDA_ENV}/lib/python3.10/site-packages/nvidia/cudnn/lib"
-if [ -d "${CUDNN8_LIB}" ]; then
-    export LD_LIBRARY_PATH="${CUDNN8_LIB}:${LD_LIBRARY_PATH:-}"
-fi
+export LD_LIBRARY_PATH="${CUDNN9_LIB}:${CUDNN8_LIB}:${LD_LIBRARY_PATH:-}"
 
 mkdir -p "${RESULT_DIR}" logs
 
