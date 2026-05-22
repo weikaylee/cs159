@@ -232,6 +232,10 @@ def write_eval_yaml(
         content,
     )
 
+    # Wandb project (append under lightning section if not already present)
+    if "wandb_project" not in content:
+        content += "\nwandb_project: cs159\n"
+
     with open(dst, "w") as f:
         f.write(content)
 
@@ -259,6 +263,7 @@ def run_inference(emrdm_dir: str, config_path: str) -> str:
         "-t", "false",
         "--no-test", "true",
         "--predict", "true",
+        "--wandb",
     ]
 
     print(f"\nRunning: {' '.join(cmd)}")
