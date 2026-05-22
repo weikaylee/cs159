@@ -24,21 +24,28 @@
 CODE_DIR="/resnick/groups/perona/oywang/cs159/phase1_mirror_map/namm"
    # TODO: absolute path to namm/
 DATA_ROOT="/resnick/groups/perona/oywang/cs159/data"                                  # TODO: SEN12MS-CR root on HPC
-OUTPUT_DIR="/scratch/oywang/cs159/checkpoints/namm_sen12mscr"
+OUTPUT_DIR="/scratch/oywang/cs159/checkpoints/namm_sen12mscr/job_${SLURM_JOB_ID}"
 CONDA_ENV="/resnick/groups/perona/oywang/conda_envs/myenv"      # TODO: conda env name
 # ── END USER SETTINGS ──────────────────────────────────────────────────────
 
 set -euo pipefail
 
-# Uncomment the lines below if you need CUDA toolkit on PATH (e.g. to build
-# natten or other extensions from source):
-# module load cuda/12.1.1-gcc-13.2.0-vjpligh
-# export CUDA_HOME=/central/software9/spack/opt/spack/linux-rhel9-broadwell/gcc-13.2.0/cuda-12.1.1-vjplighkhdsgu5uuah4oupe3dtarsz5l
-# export LD_LIBRARY_PATH=$CUDA_HOME/lib64:$LD_LIBRARY_PATH
+# Load system CUDA 12.1 so JAX can find the GPU via the system cuDNN.
+# (PyTorch 2.2.1 uses its own bundled cuDNN 8.9; JAX uses the system one.)
+module load cuda/12.1.1-gcc-13.2.0-vjpligh
+export CUDA_HOME=/central/software9/spack/opt/spack/linux-rhel9-broadwell/gcc-13.2.0/cuda-12.1.1-vjplighkhdsgu5uuah4oupe3dtarsz5l
+export LD_LIBRARY_PATH=$CUDA_HOME/lib64:$LD_LIBRARY_PATH
 
 # Activate environment.
 source "$(conda info --base)/etc/profile.d/conda.sh"
 conda activate "${CONDA_ENV}"
+
+# Expose the pip-installed cuDNN 8.9 so PyTorch can find libcudnn.so.8.
+# nvidia-cudnn-cu12 installs the .so into site-packages/nvidia/cudnn/lib/.
+CUDNN8_LIB="${CONDA_ENV}/lib/python3.10/site-packages/nvidia/cudnn/lib"
+if [ -d "${CUDNN8_LIB}" ]; then
+    export LD_LIBRARY_PATH="${CUDNN8_LIB}:${LD_LIBRARY_PATH:-}"
+fi
 
 mkdir -p "${OUTPUT_DIR}" logs
 
@@ -59,7 +66,7 @@ python train_namm.py \
     --data_root               "${DATA_ROOT}" \
     --wandb \
     --wandb_project           cs159 \
-    --wandb_run_name          "namm_sen12mscr_$(date +%Y%m%d_%H%M%S)" \
+    --wandb_run_name          "namm_sen12mscr_job${SLURM_JOB_ID}" \
     --config.training.batch_size=16 \
     --config.training.n_epochs=100 \
     --config.optim.learning_rate=2e-4 \
