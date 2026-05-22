@@ -53,7 +53,7 @@ done
 export LD_LIBRARY_PATH="/resnick/groups/perona/oywang/cudnn9/lib:${LD_LIBRARY_PATH:-}"
 # Allow XLA to use a fallback cuDNN convolution algorithm when autotuning fails.
 # Required when cuDNN 8.9 is loaded at runtime instead of the cuDNN 9 JAX expects.
-export XLA_FLAGS="--xla_gpu_strict_conv_algorithm_picker=false"
+export XLA_FLAGS="--xla_gpu_strict_conv_algorithm_picker=false --xla_gpu_enable_cudnn_frontend=false"
 
 mkdir -p "${OUTPUT_DIR}" logs
 
