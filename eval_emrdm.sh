@@ -24,7 +24,7 @@
 CODE_DIR="/resnick/groups/perona/oywang/cs159/phase2_emrdm"
 DATA_ROOT="/resnick/groups/perona/oywang/cs159/data"
 CHECKPOINT="/resnick/groups/perona/oywang/cs159/emrdm_weights/train/sentinel/checkpoints/last.ckpt"  # TODO: path to checkpoint
-RESULT_DIR="/scratch/oywang/cs159/results/emrdm_sen12mscr"
+RESULT_DIR="/scratch/oywang/cs159/results/emrdm_sen12mscr/job_${SLURM_JOB_ID}"
 CONDA_ENV="/resnick/groups/perona/oywang/conda_envs/myenv"
 # ── END USER SETTINGS ──────────────────────────────────────────────────────
 
@@ -38,6 +38,12 @@ export LD_LIBRARY_PATH=$CUDA_HOME/lib64:$LD_LIBRARY_PATH
 # Activate environment.
 source "$(conda info --base)/etc/profile.d/conda.sh"
 conda activate "${CONDA_ENV}"
+
+# Expose the pip-installed cuDNN 8.9 so PyTorch can find libcudnn.so.8.
+CUDNN8_LIB="${CONDA_ENV}/lib/python3.10/site-packages/nvidia/cudnn/lib"
+if [ -d "${CUDNN8_LIB}" ]; then
+    export LD_LIBRARY_PATH="${CUDNN8_LIB}:${LD_LIBRARY_PATH:-}"
+fi
 
 mkdir -p "${RESULT_DIR}" logs
 
