@@ -169,7 +169,7 @@ def _run_sen12mscr_training(config, workdir, progress_dir, ckpt_mgr,
     logging.info(
         'Starting training at epoch %d (step %d)', state.epoch, state.step)
 
-  if _WANDB.value:
+  if _WANDB.value and utils.is_coordinator():
     wandb.init(
         project=_WANDB_PROJECT.value,
         name=_WANDB_RUN_NAME.value,
@@ -236,7 +236,7 @@ def _run_sen12mscr_training(config, workdir, progress_dir, ckpt_mgr,
     losses_dis.append(np.mean(ep_dis))
     losses_style.append(np.mean(ep_style))
 
-    if _WANDB.value:
+    if _WANDB.value and utils.is_coordinator():
       wandb.log({
           'train/loss':     losses_total[-1],
           'train/l_cycle':  losses_cycle[-1],
@@ -303,7 +303,7 @@ def _run_sen12mscr_training(config, workdir, progress_dir, ckpt_mgr,
     val_losses_dis.append(np.mean(val_ep_dis))
     val_losses_style.append(np.mean(val_ep_style))
 
-    if _WANDB.value:
+    if _WANDB.value and utils.is_coordinator():
       wandb.log({
           'val/loss':      val_losses_total[-1],
           'val/l_cycle':   val_losses_cycle[-1],
@@ -347,7 +347,7 @@ def _run_sen12mscr_training(config, workdir, progress_dir, ckpt_mgr,
 
   ckpt_mgr.wait_until_finished()
 
-  if _WANDB.value:
+  if _WANDB.value and utils.is_coordinator():
     wandb.finish()
 
 
@@ -490,6 +490,15 @@ def main(_):
   if utils.is_coordinator():
     logging.info('Starting training at epoch %d (step %d)', state.epoch, state.step)
 
+  if _WANDB.value and utils.is_coordinator():
+    wandb.init(
+        project=_WANDB_PROJECT.value,
+        name=_WANDB_RUN_NAME.value,
+        entity=_WANDB_ENTITY.value,
+        config=config.to_dict(),
+        mode=_WANDB_MODE.value,
+    )
+
   for epoch in range(state.epoch, config.training.n_epochs):
     # Training.
     epoch_losses_total = []
@@ -538,6 +547,16 @@ def main(_):
     losses_constraint.append(np.mean(epoch_losses_constraint))
     losses_reg.append(np.mean(epoch_losses_reg))
 
+    if _WANDB.value and utils.is_coordinator():
+      wandb.log({
+          'train/loss':     losses_total[-1],
+          'train/l_cycle':  losses_cycle[-1],
+          'train/l_constr': losses_constraint[-1],
+          'train/l_reg':    losses_reg[-1],
+          'train/lr':       config.optim.learning_rate,
+          'train/epoch':    epoch + 1,
+      }, step=epoch + 1)
+
     # Validation.
     epoch_val_losses_total = []
     epoch_val_losses_cycle = []
@@ -576,6 +595,15 @@ def main(_):
     val_losses_constraint.append(np.mean(epoch_val_losses_constraint))
     val_losses_reg.append(np.mean(epoch_val_losses_reg))
 
+    if _WANDB.value and utils.is_coordinator():
+      wandb.log({
+          'val/loss':      val_losses_total[-1],
+          'val/l_cycle':   val_losses_cycle[-1],
+          'val/l_constr':  val_losses_constraint[-1],
+          'val/l_reg':     val_losses_reg[-1],
+          'val/best_loss': min(val_losses_total),
+      }, step=epoch + 1)
+
     # Save progress snapshot.
     if ((epoch + 1) % config.training.snapshot_epoch_freq == 0
         and utils.is_coordinator()):
@@ -607,6 +635,9 @@ def main(_):
       ckpt_mgr.save(epoch + 1, args=ocp.args.StandardSave(state))
   
   ckpt_mgr.wait_until_finished()
+
+  if _WANDB.value and utils.is_coordinator():
+    wandb.finish()
 
 
 if __name__ == '__main__':
