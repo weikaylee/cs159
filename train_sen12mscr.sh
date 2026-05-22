@@ -30,20 +30,9 @@ CONDA_ENV="/resnick/groups/perona/oywang/conda_envs/myenv"      # TODO: conda en
 
 set -euo pipefail
 
-# Load cuDNN so JAX can use the GPU.
-# Run `module avail cudnn` to find the exact module name on this cluster.
-module load cudnn 2>/dev/null || echo "WARNING: cudnn module not found — JAX may fall back to CPU"
-
 # Activate environment.
 source "$(conda info --base)/etc/profile.d/conda.sh"
 conda activate "${CONDA_ENV}"
-
-# If the module load above didn't work, try the pip-bundled cuDNN instead.
-# pip install -q "jax[cuda12]" will reinstall jaxlib with cuDNN included.
-python -c "import jax; jax.devices('gpu')" 2>/dev/null || {
-  echo "GPU not visible to JAX — attempting pip install of bundled cuDNN..."
-  pip install -q "jax[cuda12]"
-}
 
 mkdir -p "${OUTPUT_DIR}" logs
 
@@ -59,16 +48,17 @@ echo "  Start:      $(date)"
 echo "===================="
 
 python train_namm.py \
-    --config              configs/sen12mscr_config.py \
-    --workdir             "${OUTPUT_DIR}" \
-    --data_root           "${DATA_ROOT}" \
+    --config                  configs/sen12mscr_config.py \
+    --workdir                 "${OUTPUT_DIR}" \
+    --data_root               "${DATA_ROOT}" \
     --wandb \
-    --wandb_project       cs159 \
-    --wandb_run_name      "namm_sen12mscr_$(date +%Y%m%d_%H%M%S)" \
+    --wandb_project           cs159 \
+    --wandb_run_name          "namm_sen12mscr_$(date +%Y%m%d_%H%M%S)" \
     --config.training.batch_size=16 \
     --config.training.n_epochs=100 \
     --config.optim.learning_rate=2e-4 \
     --config.optim.constraint_weight=0.1 \
-    --config.constraint.style_weight=100.0
+    --config.constraint.style_weight=100.0 \
+    --config.data.num_workers=0
 
 echo "===== Finished: $(date) ====="
