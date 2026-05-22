@@ -319,6 +319,9 @@ def get_dataloader(
         pin_memory=torch.cuda.is_available(),
         drop_last=True,
         persistent_workers=num_workers > 0,
+        # JAX is multithreaded; fork() after JAX init causes deadlocks.
+        # 'spawn' starts fresh worker processes instead of forking.
+        multiprocessing_context="spawn" if num_workers > 0 else None,
     )
 
 

@@ -30,9 +30,20 @@ CONDA_ENV="/resnick/groups/perona/oywang/conda_envs/myenv"      # TODO: conda en
 
 set -euo pipefail
 
+# Load cuDNN so JAX can use the GPU.
+# Run `module avail cudnn` to find the exact module name on this cluster.
+module load cudnn 2>/dev/null || echo "WARNING: cudnn module not found — JAX may fall back to CPU"
+
 # Activate environment.
 source "$(conda info --base)/etc/profile.d/conda.sh"
 conda activate "${CONDA_ENV}"
+
+# If the module load above didn't work, try the pip-bundled cuDNN instead.
+# pip install -q "jax[cuda12]" will reinstall jaxlib with cuDNN included.
+python -c "import jax; jax.devices('gpu')" 2>/dev/null || {
+  echo "GPU not visible to JAX — attempting pip install of bundled cuDNN..."
+  pip install -q "jax[cuda12]"
+}
 
 mkdir -p "${OUTPUT_DIR}" logs
 

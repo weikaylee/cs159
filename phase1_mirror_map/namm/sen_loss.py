@@ -220,7 +220,9 @@ def gram_matrix(
         feat
     )
 
-    norm = (C * H * W) ** 2
+    # Use Python float to avoid int32 overflow in JAX's default x32 mode.
+    # (C * H * W)^2 can exceed 2^31 for large feature maps (e.g. 64×64×64).
+    norm = float(C * H * W) ** 2
 
     return gram / norm
 
