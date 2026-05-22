@@ -43,16 +43,13 @@ export HF_HOME=/resnick/groups/perona/oywang/.cache/huggingface
 export TORCH_HOME=/resnick/groups/perona/oywang/.cache/torch
 export PIP_CACHE_DIR=/resnick/groups/perona/oywang/.cache/pip
 
-# Add all pip-installed NVIDIA CUDA library directories to LD_LIBRARY_PATH so
-# JAX's PJRT plugin can find cublas, cusparse, cusolver, cufft, etc.
+# Add all pip-installed NVIDIA CUDA library directories to LD_LIBRARY_PATH.
+# jax[cuda12] installs cuDNN 9 + all other CUDA libs into site-packages/nvidia/*/lib.
+# No separate cuDNN directory needed — PyTorch has been removed.
 NVIDIA_BASE="${CONDA_ENV}/lib/python3.10/site-packages/nvidia"
 for lib_path in "${NVIDIA_BASE}"/*/lib; do
   [ -d "${lib_path}" ] && export LD_LIBRARY_PATH="${lib_path}:${LD_LIBRARY_PATH:-}"
 done
-# Expose the saved cuDNN 9 so JAX can find libcudnn.so.9.
-export LD_LIBRARY_PATH="/resnick/groups/perona/oywang/cudnn9/lib:${LD_LIBRARY_PATH:-}"
-# XLA flags — not needed on V100+ but kept as safety net.
-export XLA_FLAGS="--xla_gpu_strict_conv_algorithm_picker=false"
 
 mkdir -p "${OUTPUT_DIR}" logs
 
