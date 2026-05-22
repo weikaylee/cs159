@@ -390,36 +390,72 @@ class ConstraintLoss(nn.Module):
 # METRICS
 # =============================================================================
 
+def ssim(
+    x_hat: jnp.ndarray,
+    x_ref: jnp.ndarray,
+    max_val: float = 1.0,
+) -> jnp.ndarray:
+    """Global (non-windowed) SSIM averaged over the batch.
+
+    Args:
+        x_hat: (B, H, W, C) predicted image.
+        x_ref: (B, H, W, C) reference image.
+
+    Returns:
+        Scalar mean SSIM in [-1, 1].  Higher is better.
+    """
+    C1 = (0.01 * max_val) ** 2
+    C2 = (0.03 * max_val) ** 2
+
+    axes = (1, 2, 3)  # average over H, W, C per example
+
+    mu_x = jnp.mean(x_hat, axis=axes)          # (B,)
+    mu_y = jnp.mean(x_ref, axis=axes)
+
+    mu_x_bc = mu_x[:, None, None, None]
+    mu_y_bc = mu_y[:, None, None, None]
+
+    sigma_x  = jnp.mean((x_hat - mu_x_bc) ** 2,                axis=axes)
+    sigma_y  = jnp.mean((x_ref - mu_y_bc) ** 2,                axis=axes)
+    sigma_xy = jnp.mean((x_hat - mu_x_bc) * (x_ref - mu_y_bc), axis=axes)
+
+    ssim_per = (
+        (2.0 * mu_x * mu_y + C1) * (2.0 * sigma_xy + C2)
+    ) / (
+        (mu_x ** 2 + mu_y ** 2 + C1) * (sigma_x + sigma_y + C2)
+    )
+
+    return jnp.mean(ssim_per)
+
+
 def reconstruction_metrics(
     x_hat: jnp.ndarray,
     x_ref: jnp.ndarray,
 ) -> Dict[str, jnp.ndarray]:
-    """
-    Reconstruction quality metrics.
+    """MAE / SAM (rad) / PSNR (dB) / SSIM for x_hat vs x_ref.
+
+    x_hat is clamped to [0, 1] before all metrics.
 
     Returns:
-        dict of scalar batch means
+        dict of scalar batch means: mae, mse, psnr, sam, ssim
     """
 
     x_hat = jnp.clip(x_hat, 0.0, 1.0)
 
-    mae = jnp.mean(
-        jnp.abs(x_hat - x_ref)
-    )
+    mae = jnp.mean(jnp.abs(x_hat - x_ref))
 
-    mse = jnp.mean(
-        (x_hat - x_ref) ** 2
-    )
+    mse = jnp.mean((x_hat - x_ref) ** 2)
 
     psnr = -10.0 * jnp.log10(mse + 1e-8)
 
-    sam = jnp.mean(
-        spectral_angle_mapper(x_hat, x_ref)
-    )
+    sam = jnp.mean(spectral_angle_mapper(x_hat, x_ref))
+
+    ssim_val = ssim(x_hat, x_ref)
 
     return {
-        'mae': mae,
-        'mse': mse,
+        'mae':  mae,
+        'mse':  mse,
         'psnr': psnr,
-        'sam': sam,
+        'sam':  sam,
+        'ssim': ssim_val,
     }

@@ -645,8 +645,10 @@ def get_sen12mscr_namm_step_fn(
 
         (new_state, loss, loss_cycle, loss_constraint, loss_reg,
          l_recon, l_dis, l_style,
+         mae, sam, psnr, ssim,
          x_fwd, x_fwdbwd, y, y_bwd, stds)
     """
+    from sen_loss import reconstruction_metrics as _recon_metrics
 
     def loss_fn(
         rng, fwd_params, bwd_params, x, x_clean,
@@ -702,9 +704,13 @@ def get_sen12mscr_namm_step_fn(
             + regularization_weight * loss_reg
         )
 
+        # Reconstruction quality metrics: y_bwd vs. clean reference.
+        metrics = _recon_metrics(y_bwd, x_clean)
+
         return loss, (
             loss_cycle, loss_constraint, loss_reg,
             jnp.mean(c_recon), jnp.mean(c_dis), jnp.mean(c_style),
+            metrics['mae'], metrics['sam'], metrics['psnr'], metrics['ssim'],
             x_fwd, x_fwdbwd, y, y_bwd, perturb_levels,
         )
 
@@ -718,6 +724,7 @@ def get_sen12mscr_namm_step_fn(
             (loss, (
                 loss_cycle, loss_constraint, loss_reg,
                 l_recon_, l_dis_, l_style_,
+                mae_, sam_, psnr_, ssim_,
                 x_fwd, x_fwdbwd, y, y_bwd, stds,
             )), (fwd_grads, bwd_grads) = grad_fn(
                 step_rng,
@@ -727,15 +734,19 @@ def get_sen12mscr_namm_step_fn(
                 state.regularization_weight,
             )
 
-            loss          = jax.lax.pmean(loss,          axis_name="batch")
-            loss_cycle    = jax.lax.pmean(loss_cycle,    axis_name="batch")
+            loss            = jax.lax.pmean(loss,            axis_name="batch")
+            loss_cycle      = jax.lax.pmean(loss_cycle,      axis_name="batch")
             loss_constraint = jax.lax.pmean(loss_constraint, axis_name="batch")
-            loss_reg      = jax.lax.pmean(loss_reg,      axis_name="batch")
-            l_recon_      = jax.lax.pmean(l_recon_,      axis_name="batch")
-            l_dis_        = jax.lax.pmean(l_dis_,        axis_name="batch")
-            l_style_      = jax.lax.pmean(l_style_,      axis_name="batch")
-            fwd_grads     = jax.lax.pmean(fwd_grads,     axis_name="batch")
-            bwd_grads     = jax.lax.pmean(bwd_grads,     axis_name="batch")
+            loss_reg        = jax.lax.pmean(loss_reg,        axis_name="batch")
+            l_recon_        = jax.lax.pmean(l_recon_,        axis_name="batch")
+            l_dis_          = jax.lax.pmean(l_dis_,          axis_name="batch")
+            l_style_        = jax.lax.pmean(l_style_,        axis_name="batch")
+            mae_            = jax.lax.pmean(mae_,            axis_name="batch")
+            sam_            = jax.lax.pmean(sam_,            axis_name="batch")
+            psnr_           = jax.lax.pmean(psnr_,           axis_name="batch")
+            ssim_           = jax.lax.pmean(ssim_,           axis_name="batch")
+            fwd_grads       = jax.lax.pmean(fwd_grads,       axis_name="batch")
+            bwd_grads       = jax.lax.pmean(bwd_grads,       axis_name="batch")
 
             updates, new_fwd_opt_state = fwd_tx.update(
                 fwd_grads, state.fwd_opt_state, state.fwd_params
@@ -769,6 +780,7 @@ def get_sen12mscr_namm_step_fn(
             (loss, (
                 loss_cycle, loss_constraint, loss_reg,
                 l_recon_, l_dis_, l_style_,
+                mae_, sam_, psnr_, ssim_,
                 x_fwd, x_fwdbwd, y, y_bwd, stds,
             )), _ = grad_fn(
                 step_rng,
@@ -783,6 +795,7 @@ def get_sen12mscr_namm_step_fn(
             new_state,
             loss, loss_cycle, loss_constraint, loss_reg,
             l_recon_, l_dis_, l_style_,
+            mae_, sam_, psnr_, ssim_,
             x_fwd, x_fwdbwd, y, y_bwd, stds,
         )
 
