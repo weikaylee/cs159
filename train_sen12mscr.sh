@@ -34,7 +34,7 @@ set -euo pipefail
 # (PyTorch 2.2.1 uses its own bundled cuDNN 8.9; JAX uses the system one.)
 module load cuda/12.1.1-gcc-13.2.0-vjpligh
 export CUDA_HOME=/central/software9/spack/opt/spack/linux-rhel9-broadwell/gcc-13.2.0/cuda-12.1.1-vjplighkhdsgu5uuah4oupe3dtarsz5l
-export LD_LIBRARY_PATH=$CUDA_HOME/lib64:$LD_LIBRARY_PATH
+export LD_LIBRARY_PATH=$CUDA_HOME/lib64:${LD_LIBRARY_PATH:-}
 
 # Activate environment.
 source "$(conda info --base)/etc/profile.d/conda.sh"
