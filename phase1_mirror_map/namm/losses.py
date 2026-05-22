@@ -458,7 +458,7 @@ def get_namm_step_fn(model, fwd_tx, bwd_tx, constraint_losses_fn, regularization
       if update_fwd:
         updates, new_fwd_opt_state = fwd_tx.update(fwd_grads, state.fwd_opt_state, state.fwd_params)
         new_fwd_params = optax.apply_updates(state.fwd_params, updates)
-        new_fwd_params_ema = jax.tree_map(
+        new_fwd_params_ema = jax.tree.map(
           lambda p_ema, p: p_ema * state.ema_rate + p * (1. - state.ema_rate),
           state.fwd_params, new_fwd_params)
       else:
@@ -469,7 +469,7 @@ def get_namm_step_fn(model, fwd_tx, bwd_tx, constraint_losses_fn, regularization
       if update_bwd:
         updates, new_bwd_opt_state = bwd_tx.update(bwd_grads, state.bwd_opt_state, state.bwd_params)
         new_bwd_params = optax.apply_updates(state.bwd_params, updates)
-        new_bwd_params_ema = jax.tree_map(
+        new_bwd_params_ema = jax.tree.map(
           lambda p_ema, p: p_ema * state.ema_rate + p * (1. - state.ema_rate),
           state.bwd_params, new_bwd_params)
       else:
@@ -555,7 +555,7 @@ def get_score_step_fn(sde, model, optimizer, namm, namm_state, train,
 
       # Apply updates.
       new_params, new_opt_state = optimize_fn(state, grad, optimizer)
-      new_params_ema = jax.tree_map(
+      new_params_ema = jax.tree.map(
           lambda p_ema, p: p_ema * state.ema_rate + p * (1. - state.ema_rate),
           params, new_params)
       step = state.step + 1
@@ -752,7 +752,7 @@ def get_sen12mscr_namm_step_fn(
                 fwd_grads, state.fwd_opt_state, state.fwd_params
             )
             new_fwd_params = optax.apply_updates(state.fwd_params, updates)
-            new_fwd_params_ema = jax.tree_map(
+            new_fwd_params_ema = jax.tree.map(
                 lambda ema, p: ema * state.ema_rate + p * (1.0 - state.ema_rate),
                 state.fwd_params, new_fwd_params,
             )
@@ -761,7 +761,7 @@ def get_sen12mscr_namm_step_fn(
                 bwd_grads, state.bwd_opt_state, state.bwd_params
             )
             new_bwd_params = optax.apply_updates(state.bwd_params, updates)
-            new_bwd_params_ema = jax.tree_map(
+            new_bwd_params_ema = jax.tree.map(
                 lambda ema, p: ema * state.ema_rate + p * (1.0 - state.ema_rate),
                 state.bwd_params, new_bwd_params,
             )

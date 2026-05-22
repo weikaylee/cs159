@@ -246,8 +246,11 @@ def write_eval_yaml(
 def run_inference(emrdm_dir: str, config_path: str) -> str:
     """Run EMRDM prediction and return the logs directory."""
     env = os.environ.copy()
-    # Make sure the local sgm package is importable
-    env["PYTHONPATH"] = emrdm_dir + os.pathsep + env.get("PYTHONPATH", "")
+    # Prepend emrdm_dir so the local sgm package is importable.
+    # Use PYTHONPATH only if it was already set to avoid breaking pkg_resources
+    # in environments where setuptools namespace packages rely on an empty path.
+    existing = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = (emrdm_dir + os.pathsep + existing) if existing else emrdm_dir
 
     cmd = [
         sys.executable, "main.py",

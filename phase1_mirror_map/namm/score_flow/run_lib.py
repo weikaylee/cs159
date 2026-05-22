@@ -166,7 +166,7 @@ def train(config, workdir):
 
   for step in range(initial_step, num_train_steps + 1, config.training.n_jitted_steps):
     # Convert data to JAX arrays and normalize them. Use ._numpy() to avoid copy.
-    batch = jax.tree_map(lambda x: scaler(x._numpy()), next(train_iter))  # pylint: disable=protected-access
+    batch = jax.tree.map(lambda x: scaler(x._numpy()), next(train_iter))  # pylint: disable=protected-access
     rng, *next_rng = jax.random.split(rng, num=jax.local_device_count() + 1)
     next_rng = jnp.asarray(next_rng)
     # Execute one training step
@@ -188,7 +188,7 @@ def train(config, workdir):
 
     # Report the loss on an evaluation dataset periodically
     if step % config.training.eval_freq == 0:
-      eval_batch = jax.tree_map(lambda x: scaler(x._numpy()), next(eval_iter))  # pylint: disable=protected-access
+      eval_batch = jax.tree.map(lambda x: scaler(x._numpy()), next(eval_iter))  # pylint: disable=protected-access
       rng, *next_rng = jax.random.split(rng, num=jax.local_device_count() + 1)
       next_rng = jnp.asarray(next_rng)
       (_, _), peval_loss = p_eval_step((next_rng, pstate), eval_batch)
@@ -432,7 +432,7 @@ def evaluate(config,
       all_losses = []
       eval_iter = iter(eval_ds)  # pytype: disable=wrong-arg-types
       for i, batch in enumerate(eval_iter):
-        eval_batch = jax.tree_map(lambda x: scaler(x._numpy()), batch)  # pylint: disable=protected-access
+        eval_batch = jax.tree.map(lambda x: scaler(x._numpy()), batch)  # pylint: disable=protected-access
         rng, *next_rng = jax.random.split(rng, num=jax.local_device_count() + 1)
         next_rng = jnp.asarray(next_rng)
         (_, _), p_eval_loss = p_eval_step((next_rng, pstate), eval_batch)
@@ -464,7 +464,7 @@ def evaluate(config,
                                              f"{config.eval.bpd_dataset}_ckpt_{ckpt}_bpd_{bpd_round_id}.npz")):
             continue
           batch = next(bpd_iter)
-          eval_batch = jax.tree_map(lambda x: scaler(x._numpy()), batch)
+          eval_batch = jax.tree.map(lambda x: scaler(x._numpy()), batch)
           if config.eval.dequantizer:
             rng, step_rng = jax.random.split(rng)
             data = eval_batch['image']
@@ -780,7 +780,7 @@ def train_deq(config, workdir, deq_workdir):
 
   for step in range(initial_step, num_train_steps + 1, config.training.n_jitted_steps):
     # Convert data to JAX arrays and normalize them. Use ._numpy() to avoid copy.
-    batch = jax.tree_map(lambda x: scaler(x._numpy()), next(train_iter))  # pylint: disable=protected-access
+    batch = jax.tree.map(lambda x: scaler(x._numpy()), next(train_iter))  # pylint: disable=protected-access
     rng, *next_rng = jax.random.split(rng, num=jax.local_device_count() + 1)
     next_rng = jnp.asarray(next_rng)
     # Execute one training step
@@ -788,7 +788,7 @@ def train_deq(config, workdir, deq_workdir):
     loss = flax.jax_utils.unreplicate(ploss)
     # Log to console, file and tensorboard on host 0
     if jax.host_id() == 0 and step % config.training.log_freq == 0:
-      loss = jax.tree_map(lambda x: x.mean(), loss)
+      loss = jax.tree.map(lambda x: x.mean(), loss)
       ema_train_bpd = 0.99 * ema_train_bpd + 0.01 * loss[1]
       logging.info(
         f"step: {step}, training_loss: {loss[0]:.5e}, training_bpd: {loss[1]:.5e}, ema_bpd: {ema_train_bpd:.5e}")
@@ -805,13 +805,13 @@ def train_deq(config, workdir, deq_workdir):
 
     # Report the loss on an evaluation dataset periodically
     if step % config.training.eval_freq == 0:
-      eval_batch = jax.tree_map(lambda x: scaler(x._numpy()), next(eval_iter))  # pylint: disable=protected-access
+      eval_batch = jax.tree.map(lambda x: scaler(x._numpy()), next(eval_iter))  # pylint: disable=protected-access
       rng, *next_rng = jax.random.split(rng, num=jax.local_device_count() + 1)
       next_rng = jnp.asarray(next_rng)
       (_, _), peval_loss = p_eval_step((next_rng, pstate), eval_batch)
       eval_loss = flax.jax_utils.unreplicate(peval_loss)
       if jax.host_id() == 0:
-        eval_loss = jax.tree_map(lambda x: x.mean(), eval_loss)
+        eval_loss = jax.tree.map(lambda x: x.mean(), eval_loss)
         ema_eval_bpd = 0.9 * ema_eval_bpd + 0.1 * eval_loss[1]
         logging.info(
           f"step: {step}, eval_loss: {eval_loss[0]:.5e}, eval_bpd: {eval_loss[1]:.5e}, ema_bpd: {ema_eval_bpd:.5e}")
