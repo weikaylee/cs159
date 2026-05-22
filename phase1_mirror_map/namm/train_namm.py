@@ -375,6 +375,7 @@ def main(_):
   # Create checkpoint manager.
   ckpt_mgr = ocp.CheckpointManager(ckpt_dir)
 
+  print('Dataset: ', config.data.dataset)
   # Get data.  (SEN12MSCR uses a PyTorch DataLoader; handled in _run_sen12mscr_training.)
   if config.data.dataset != 'sen12mscr':
     train_ds, val_ds, _ = datasets.get_dataset(
