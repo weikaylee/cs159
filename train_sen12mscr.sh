@@ -11,9 +11,8 @@
 #SBATCH -J "train mirror map"   # job name
 #SBATCH --partition=gpu            # TODO: set to your cluster's GPU partition
 #SBATCH --nodes=1
-#SBATCH --ntasks-per-node=1
-#SBATCH --gres=gpu:4               # TODO: adjust GPU count (must match batch_size / per_device_batch)
-#SBATCH --cpus-per-task=16         # DataLoader workers × GPUs
+#SBATCH --ntasks=5
+#SBATCH --gres=gpu:1               # TODO: adjust GPU count (must match batch_size / per_device_batch)
 #SBATCH --mem=128G                  # TODO: increase if OOM
 #SBATCH --time=48:00:00            # TODO: adjust wall-clock limit
 #SBATCH --output=logs/sen12mscr_%j.out
