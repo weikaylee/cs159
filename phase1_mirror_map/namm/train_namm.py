@@ -182,6 +182,7 @@ def _run_sen12mscr_training(config, workdir, progress_dir, ckpt_mgr,
     # Training.
     ep_loss, ep_cycle, ep_constr, ep_reg = [], [], [], []
     ep_recon, ep_dis, ep_style = [], [], []
+    ep_mae, ep_sam, ep_psnr, ep_ssim = [], [], [], []
     epoch_time = 0.0
     for step, item in enumerate(jax_iter(train_loader, n_devices, per_device_batch)):
       s = time.perf_counter()
@@ -192,6 +193,7 @@ def _run_sen12mscr_training(config, workdir, progress_dir, ckpt_mgr,
       (pstate,
        ploss, ploss_cycle, ploss_constr, ploss_reg,
        ploss_recon, ploss_dis, ploss_style,
+       ploss_mae, ploss_sam, ploss_psnr, ploss_ssim,
        x_fwd, x_fwdbwd, y, y_bwd, stds) = pstep_fn(
           (step_rngs, pstate), batch, batch_clean)
 
@@ -202,19 +204,27 @@ def _run_sen12mscr_training(config, workdir, progress_dir, ckpt_mgr,
       recon  = flax.jax_utils.unreplicate(ploss_recon).item()
       dis    = flax.jax_utils.unreplicate(ploss_dis).item()
       style  = flax.jax_utils.unreplicate(ploss_style).item()
+      mae    = flax.jax_utils.unreplicate(ploss_mae).item()
+      sam    = flax.jax_utils.unreplicate(ploss_sam).item()
+      psnr   = flax.jax_utils.unreplicate(ploss_psnr).item()
+      ssim   = flax.jax_utils.unreplicate(ploss_ssim).item()
 
       t = time.perf_counter() - s
       epoch_time += t
       ep_loss.append(loss);   ep_cycle.append(cycle)
       ep_constr.append(constr); ep_reg.append(reg)
       ep_recon.append(recon); ep_dis.append(dis); ep_style.append(style)
+      ep_mae.append(mae); ep_sam.append(sam)
+      ep_psnr.append(psnr); ep_ssim.append(ssim)
 
       if ((step + 1) % config.training.log_freq == 0) and utils.is_coordinator():
         logging.info(
             '[epoch %03d, step %03d] %.3fs  '
             'loss=%.4e  cycle=%.4e  constr=%.4e '
-            '(recon=%.4e  dis=%.4e  style=%.4e)  reg=%.4e',
-            epoch, step + 1, t, loss, cycle, constr, recon, dis, style, reg)
+            '(recon=%.4e  dis=%.4e  style=%.4e)  reg=%.4e  '
+            'psnr=%.2f  ssim=%.3f',
+            epoch, step + 1, t, loss, cycle, constr, recon, dis, style, reg,
+            psnr, ssim)
 
     epoch_times.append(epoch_time)
     losses_total.append(np.mean(ep_loss))
@@ -227,19 +237,25 @@ def _run_sen12mscr_training(config, workdir, progress_dir, ckpt_mgr,
 
     if _WANDB.value and utils.is_coordinator():
       wandb.log({
-          'train/loss':       losses_total[-1],
-          'train/l_cycle':    losses_cycle[-1],
-          'train/l_constr':   losses_constraint[-1],
-          'train/l_reg':      losses_reg[-1],
-          'train/l_recon':    losses_recon[-1],
-          'train/l_dis':      losses_dis[-1],
-          'train/l_style':    losses_style[-1],
-          'train/epoch':      epoch + 1,
+          'train/loss':     losses_total[-1],
+          'train/l_cycle':  losses_cycle[-1],
+          'train/l_constr': losses_constraint[-1],
+          'train/l_recon':  losses_recon[-1],
+          'train/l_dis':    losses_dis[-1],
+          'train/l_style':  losses_style[-1],
+          'train/l_reg':    losses_reg[-1],
+          'train/mae':      float(np.mean(ep_mae)),
+          'train/sam':      float(np.mean(ep_sam)),
+          'train/psnr':     float(np.mean(ep_psnr)),
+          'train/ssim':     float(np.mean(ep_ssim)),
+          'train/lr':       config.optim.learning_rate,
+          'train/epoch':    epoch + 1,
       }, step=epoch + 1)
 
     # Validation.
     val_ep_loss, val_ep_cycle, val_ep_constr, val_ep_reg = [], [], [], []
     val_ep_recon, val_ep_dis, val_ep_style = [], [], []
+    val_ep_mae, val_ep_sam, val_ep_psnr, val_ep_ssim = [], [], [], []
     for step, item in enumerate(jax_iter(val_loader, n_devices, per_device_batch)):
       s = time.perf_counter()
       val_batch       = item['image']
@@ -248,6 +264,7 @@ def _run_sen12mscr_training(config, workdir, progress_dir, ckpt_mgr,
       rng, next_rngs = utils.psplit(rng)
       (_, val_ploss, val_ploss_cycle, val_ploss_constr, val_ploss_reg,
        val_ploss_recon, val_ploss_dis, val_ploss_style,
+       val_ploss_mae, val_ploss_sam, val_ploss_psnr, val_ploss_ssim,
        _, _, _, _, _) = peval_fn(
           (next_rngs, pstate), val_batch, val_batch_clean)
 
@@ -258,18 +275,24 @@ def _run_sen12mscr_training(config, workdir, progress_dir, ckpt_mgr,
       val_recon  = flax.jax_utils.unreplicate(val_ploss_recon).item()
       val_dis    = flax.jax_utils.unreplicate(val_ploss_dis).item()
       val_style  = flax.jax_utils.unreplicate(val_ploss_style).item()
+      val_mae    = flax.jax_utils.unreplicate(val_ploss_mae).item()
+      val_sam    = flax.jax_utils.unreplicate(val_ploss_sam).item()
+      val_psnr   = flax.jax_utils.unreplicate(val_ploss_psnr).item()
+      val_ssim   = flax.jax_utils.unreplicate(val_ploss_ssim).item()
 
       val_ep_loss.append(val_loss);     val_ep_cycle.append(val_cycle)
       val_ep_constr.append(val_constr); val_ep_reg.append(val_reg)
       val_ep_recon.append(val_recon);   val_ep_dis.append(val_dis)
       val_ep_style.append(val_style)
+      val_ep_mae.append(val_mae); val_ep_sam.append(val_sam)
+      val_ep_psnr.append(val_psnr); val_ep_ssim.append(val_ssim)
 
       if (step == 0 or (step + 1) % config.training.log_freq == 0) and utils.is_coordinator():
         t = time.perf_counter() - s
         logging.info(
             '[epoch %03d, step %03d] %.3fs  val_loss=%.4e  '
-            '(recon=%.4e  dis=%.4e  style=%.4e)',
-            epoch, step + 1, t, val_loss, val_recon, val_dis, val_style)
+            'psnr=%.2f  ssim=%.3f',
+            epoch, step + 1, t, val_loss, val_psnr, val_ssim)
 
     val_losses_total.append(np.mean(val_ep_loss))
     val_losses_cycle.append(np.mean(val_ep_cycle))
@@ -281,14 +304,18 @@ def _run_sen12mscr_training(config, workdir, progress_dir, ckpt_mgr,
 
     if _WANDB.value and utils.is_coordinator():
       wandb.log({
-          'val/loss':       val_losses_total[-1],
-          'val/l_cycle':    val_losses_cycle[-1],
-          'val/l_constr':   val_losses_constraint[-1],
-          'val/l_reg':      val_losses_reg[-1],
-          'val/l_recon':    val_losses_recon[-1],
-          'val/l_dis':      val_losses_dis[-1],
-          'val/l_style':    val_losses_style[-1],
-          'val/best_loss':  min(val_losses_total),
+          'val/loss':      val_losses_total[-1],
+          'val/l_cycle':   val_losses_cycle[-1],
+          'val/l_constr':  val_losses_constraint[-1],
+          'val/l_recon':   val_losses_recon[-1],
+          'val/l_dis':     val_losses_dis[-1],
+          'val/l_style':   val_losses_style[-1],
+          'val/l_reg':     val_losses_reg[-1],
+          'val/mae':       float(np.mean(val_ep_mae)),
+          'val/sam':       float(np.mean(val_ep_sam)),
+          'val/psnr':      float(np.mean(val_ep_psnr)),
+          'val/ssim':      float(np.mean(val_ep_ssim)),
+          'val/best_loss': min(val_losses_total),
       }, step=epoch + 1)
 
     # Save progress snapshot.
