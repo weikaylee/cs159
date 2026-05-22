@@ -37,7 +37,7 @@ _DATA_ROOT = flags.DEFINE_string(
   'Root directory of the SEN12MS-CR dataset (e.g. /data/). '
   'Overrides config.data.data_root when provided.')
 _WANDB = flags.DEFINE_bool(
-  'wandb', False, 'Stream metrics to Weights & Biases.')
+  'wandb', True, 'Stream metrics to Weights & Biases.')
 _WANDB_PROJECT = flags.DEFINE_string(
   'wandb_project', 'cs159', 'Wandb project name.')
 _WANDB_RUN_NAME = flags.DEFINE_string(
@@ -168,14 +168,15 @@ def _run_sen12mscr_training(config, workdir, progress_dir, ckpt_mgr,
         len(train_loader.dataset), len(val_loader.dataset))
     logging.info(
         'Starting training at epoch %d (step %d)', state.epoch, state.step)
-    if _WANDB.value:
-      wandb.init(
-          project=_WANDB_PROJECT.value,
-          name=_WANDB_RUN_NAME.value,
-          entity=_WANDB_ENTITY.value,
-          config=config.to_dict(),
-          mode=_WANDB_MODE.value,
-      )
+
+  if _WANDB.value:
+    wandb.init(
+        project=_WANDB_PROJECT.value,
+        name=_WANDB_RUN_NAME.value,
+        entity=_WANDB_ENTITY.value,
+        config=config.to_dict(),
+        mode=_WANDB_MODE.value,
+    )
 
   for epoch in range(state.epoch, config.training.n_epochs):
 
@@ -235,7 +236,7 @@ def _run_sen12mscr_training(config, workdir, progress_dir, ckpt_mgr,
     losses_dis.append(np.mean(ep_dis))
     losses_style.append(np.mean(ep_style))
 
-    if _WANDB.value and utils.is_coordinator():
+    if _WANDB.value:
       wandb.log({
           'train/loss':     losses_total[-1],
           'train/l_cycle':  losses_cycle[-1],
@@ -302,7 +303,7 @@ def _run_sen12mscr_training(config, workdir, progress_dir, ckpt_mgr,
     val_losses_dis.append(np.mean(val_ep_dis))
     val_losses_style.append(np.mean(val_ep_style))
 
-    if _WANDB.value and utils.is_coordinator():
+    if _WANDB.value:
       wandb.log({
           'val/loss':      val_losses_total[-1],
           'val/l_cycle':   val_losses_cycle[-1],
@@ -346,7 +347,7 @@ def _run_sen12mscr_training(config, workdir, progress_dir, ckpt_mgr,
 
   ckpt_mgr.wait_until_finished()
 
-  if _WANDB.value and utils.is_coordinator():
+  if _WANDB.value:
     wandb.finish()
 
 
