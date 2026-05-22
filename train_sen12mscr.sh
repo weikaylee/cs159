@@ -9,10 +9,10 @@
 
 # ── Resource allocation ────────────────────────────────────────────────────
 #SBATCH -J "train mirror map"   # job name
-#SBATCH --partition=gpu            # TODO: set to your cluster's GPU partition
+#SBATCH --partition=gpu
 #SBATCH --nodes=1
 #SBATCH --ntasks=5
-#SBATCH --gres=gpu:1               # TODO: adjust GPU count (must match batch_size / per_device_batch)
+#SBATCH --gres=gpu:v100:1          # V100 (CC 7.0) — required for cuDNN 9 frontend API
 #SBATCH --mem=128G                  # TODO: increase if OOM
 #SBATCH --time=48:00:00            # TODO: adjust wall-clock limit
 #SBATCH --output=logs/sen12mscr_%j.out
@@ -51,9 +51,8 @@ for lib_path in "${NVIDIA_BASE}"/*/lib; do
 done
 # Expose the saved cuDNN 9 so JAX can find libcudnn.so.9.
 export LD_LIBRARY_PATH="/resnick/groups/perona/oywang/cudnn9/lib:${LD_LIBRARY_PATH:-}"
-# Allow XLA to use a fallback cuDNN convolution algorithm when autotuning fails.
-# Required when cuDNN 8.9 is loaded at runtime instead of the cuDNN 9 JAX expects.
-export XLA_FLAGS="--xla_gpu_strict_conv_algorithm_picker=false --xla_gpu_enable_cudnn_frontend=false"
+# XLA flags — not needed on V100+ but kept as safety net.
+export XLA_FLAGS="--xla_gpu_strict_conv_algorithm_picker=false"
 
 mkdir -p "${OUTPUT_DIR}" logs
 
