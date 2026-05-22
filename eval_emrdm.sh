@@ -39,6 +39,11 @@ export LD_LIBRARY_PATH=$CUDA_HOME/lib64:${LD_LIBRARY_PATH:-}
 source "$(conda info --base)/etc/profile.d/conda.sh"
 conda activate "${CONDA_ENV}"
 
+# Redirect large caches to scratch to avoid filling home directory.
+export HF_HOME=/resnick/groups/perona/oywang/.cache/huggingface
+export TORCH_HOME=/resnick/groups/perona/oywang/.cache/torch
+export PIP_CACHE_DIR=/resnick/groups/perona/oywang/.cache/pip
+
 # Expose the pip-installed cuDNN 8.9 so PyTorch can find libcudnn.so.8.
 CUDNN8_LIB="${CONDA_ENV}/lib/python3.10/site-packages/nvidia/cudnn/lib"
 if [ -d "${CUDNN8_LIB}" ]; then
