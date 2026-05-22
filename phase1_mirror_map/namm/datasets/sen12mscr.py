@@ -316,7 +316,7 @@ def get_dataloader(
         batch_size=batch_size,
         shuffle=shuffle,
         num_workers=num_workers,
-        pin_memory=torch.cuda.is_available(),
+        pin_memory=False,  # JAX owns the GPU; PyTorch is CPU-only here
         drop_last=True,
         persistent_workers=num_workers > 0,
         # JAX is multithreaded; fork() after JAX init causes deadlocks.
