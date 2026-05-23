@@ -49,7 +49,8 @@ def get_args():
     p.add_argument('--run_name',     type=str, default=None,
                    help='Run name (used for default output_dir)')
     p.add_argument('--roi',          default='ROIs1158_spring',
-                   help='Which ROI to train on')
+                   help="Which ROI to train on; 'all' (or 'none'/'') loads "
+                        "every cloud-free season under --data_root")
 
     # Model
     p.add_argument('--n_channels',   type=int, default=13)
@@ -67,6 +68,7 @@ def get_args():
     p.add_argument('--max_sigma',    type=float, default=0.1,
                    help='Max noise level for inverse map robustness')
     p.add_argument('--style_weight', type=float, default=100.0)
+    p.add_argument('--dis_weight',   type=float, default=1.0)
     p.add_argument('--sam_weight',   type=float, default=1.0)
     p.add_argument('--moment_weight', type=float, default=1.0)
     p.add_argument('--cycle_weight', type=float, default=1.0)
@@ -164,6 +166,9 @@ def validate(g_phi, f_psi, constraint_loss, val_loader, device, args):
 
 def main():
     args = get_args()
+    # 'all'/'none'/'' selects every cloud-free season (dataset.py roi=None).
+    if args.roi is not None and args.roi.lower() in ('all', 'none', ''):
+        args.roi = None
     if args.output_dir is None:
         run_name = args.run_name or args.wandb_run_name or 'train_mirror_map'
         args.output_dir = os.path.join(os.getcwd(), 'runs', run_name)
@@ -212,6 +217,7 @@ def main():
         n_input_channels=args.n_channels,
         sam_weight=args.sam_weight,
         moment_weight=args.moment_weight,
+        dis_weight=args.dis_weight,
     ).to(device)
 
     # ── Optimisers ───────────────────────────────────────────────────────────

@@ -50,3 +50,38 @@ follows equations of amos et al (og icnn paper). but, doesn't follow implementat
 - so, new impl adds this term and more closely follows tan et al impl. see docstrings for sum notes too
 - updated inverse_map.py st it applies relu after residual (instead of other way around) to match namm impl
 - removed ema stuff from train_mirror_map.py. namm/train_namm.py doesn't use it, and idk why we'd have to use it xd
+- added download_all_data.sh -- taken from sen12cm authors; downlaods all data interacively
+
+5/23 fixing loss ablations and adding slurm scripts
+problem: loss vals from vgg terms are HUGE (1e9)
+
+claude:
+Root cause is l_style in phase1_mirror_map/losses.py. The Gatys
+ normalization ||Gg − Gr||²_F / (4·C²·H²·W²) leaves per-layer style loss
+ scaling as O(activation⁴): each Gram entry is Σ_{HW} F_i F_j = O(M·a²),
+ squared and summed over C² entries gives O(C²·M²·a⁴), and the denom
+ 4·C²·M² cancels everything except O(a⁴). With ImageNet-normalized
+ Sentinel-2 RGB and VGG-19 ReLU activations of O(10–100), l_style ≈ 1e7;
+ times style_weight=100 → ~1e9, swamping cycle (~24), recon (~0.5), and the
+ spectral terms (~0.5).
+
+ Other terms are already in compatible ranges: l_dis (Gaussian-kernel MMD) is
+ bounded in roughly [-2, 2]; l_recon, l_sam, l_moments are all O(1) on
+ [0, 1] reflectance.
+
+ Effect on the ablation: in vgg / full runs the gradient is dominated by
+ VGG style, so any signal from L_sam / L_moments / L_recon is invisible
+ and cross-family val-loss ranking is not meaningful.
+
+fix: Replace the Gatys denominator with a per-layer relative-error formulation:
+
+ L_style = Σ_l  w_l · ||G_gen^l − G_ref^l||²_F  /  (||G_ref^l||²_F + eps)
+
+ Both numerator and denominator are O(a⁴), so the ratio is invariant to VGG
+ activation magnitudes, feature-map size, and input distribution. At
+ initialization it sits near O(1) when Gen and Ref Grams are dissimilar; goes
+ to 0 as they match (preserving the existing "zero on identical inputs"
+ property the unit tests check). Same semantic intent as Gatys — match
+ channel co-activation patterns — just unit-free.
+
+ gram_matrix stays as the raw F F^T; normalization is l_style's job.
