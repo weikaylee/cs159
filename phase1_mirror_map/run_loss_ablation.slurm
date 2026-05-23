@@ -5,7 +5,7 @@
 # --vgg_style_values, or --vgg_dis_values, update --array to match
 # (M^2 vgg + N^2 spectral configs).
 #
-# EDIT BEFORE SUBMITTING: --mail-user, --partition, and the paths below.
+# EDIT BEFORE SUBMITTING: --epochs, --mail-user, --partition, and the paths below.
 
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -16,21 +16,22 @@
 #SBATCH --time=24:00:00            # per array task (one config)
 
 #SBATCH -J "phase1-loss-ablation"
-#SBATCH --mail-user=CHANGE_ME@caltech.edu
+#SBATCH --mail-user=kwei2@caltech.edu
 #SBATCH --mail-type=END
 #SBATCH --mail-type=FAIL
 
 #SBATCH --array=0-17
 #SBATCH --output=slurm-loss-ablation-%A_%a.out
+#SBATCH --error=slurm-loss-ablation-%A_%a.err
 
 # ── Environment ──────────────────────────────────────────────────────────────
 source ~/.bashrc
 conda activate emrdm
 
 # ── Paths ────────────────────────────────────────────────────────────────────
-DATA_ROOT="/resnick/groups/perona/oywang/cs159/SEN12MSCR"
-CODE_DIR="/resnick/groups/perona/oywang/cs159/code/phase1_mirror_map"
-OUTPUT_ROOT="/resnick/groups/perona/oywang/cs159/checkpoints/phase1_loss_ablation"
+DATA_ROOT="/resnick/groups/CS156b/from_central/2026/SSSClassCSNerds/cs159/data"
+CODE_DIR="/resnick/groups/CS156b/from_central/2026/SSSClassCSNerds/cs159/phase1_mirror_map"
+OUTPUT_ROOT="/resnick/groups/CS156b/from_central/2026/SSSClassCSNerds/cs159/runs/loss_ablations"
 
 mkdir -p "$OUTPUT_ROOT"
 
