@@ -18,6 +18,7 @@ from typing import cast
 import torch.nn as nn
 import torch.nn.functional as F
 import torchvision.models as models
+import warnings
 
 
 # ── VGG feature extractor ──────────────────────────────────────────────────────
@@ -38,7 +39,14 @@ class VGGFeatureExtractor(nn.Module):
 
     def __init__(self, n_input_channels: int = 13):
         super().__init__()
-        vgg = models.vgg19(weights=models.VGG19_Weights.DEFAULT)
+        try:
+            vgg = models.vgg19(weights=models.VGG19_Weights.DEFAULT)
+        except Exception as exc:
+            warnings.warn(
+                f"Falling back to VGG19 without pretrained weights because loading the cached weights failed: {exc}",
+                RuntimeWarning,
+            )
+            vgg = models.vgg19(weights=None)
         self.features = vgg.features
 
         # Freeze VGG weights
