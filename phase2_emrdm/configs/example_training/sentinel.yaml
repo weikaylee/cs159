@@ -7,7 +7,7 @@ model:
     compile_model: False
     use_ema: True
     use_flash_attn2: False
-    # ckpt_path: "" # your checkpoint path
+    ckpt_path: "/resnick/groups/perona/oywang/cs159/emrdm_weights/train/sentinel/checkpoints/last.ckpt" # your checkpoint path
 
     sigma_st_config:
       target: sgm.modules.diffusionmodules.sigma2st.EDMSigma2St
