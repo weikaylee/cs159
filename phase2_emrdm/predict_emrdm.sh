@@ -5,9 +5,9 @@
 # TODO EDIT BEFORE SUBMITTING: --epochs, --mail-user, --partition, and the paths below.
 
 #SBATCH --nodes=1
-#SBATCH --ntasks-per-node=2
+#SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=8
-#SBATCH --gres=gpu:2
+#SBATCH --gres=gpu:1
 #SBATCH --mem=128G
 #SBATCH --partition=gpu
 #SBATCH --time=24:00:00
