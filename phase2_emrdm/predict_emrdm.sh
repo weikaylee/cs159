@@ -32,7 +32,7 @@ cd "$CODE_DIR"
 python run_emrdm_predict.py \
         --data_root /resnick/groups/perona/oywang/cs159/data \
         --ckpt_path /resnick/groups/perona/oywang/cs159/emrdm_weights/train/sentinel/checkpoints \
-        --output_dir /resnick/groups/perona/oywang/cs159/output/emrdm_predict \
+        --output_dir /resnick/groups/perona/oywang/cs159/output/emrdm_predict
 EMRDM_EXIT=$?
 if [ $EMRDM_EXIT -ne 0 ]; then
     echo "ERROR: EMRDM prediction job failed with exit code $EMRDM_EXIT" >&2
