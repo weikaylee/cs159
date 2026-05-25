@@ -84,9 +84,9 @@ class InverseMap(nn.Module):
             ]
         decoder += [
             nn.Conv2d(ngf, n_channels, 7, padding=3),
-            nn.ReLU(inplace=True),  # reflectance values are non-negative
         ]
         self.decoder = nn.Sequential(*decoder)
+        self.final_activation = nn.ReLU(inplace=True)
 
     def forward(self, y: torch.Tensor) -> torch.Tensor:
         """
@@ -100,4 +100,6 @@ class InverseMap(nn.Module):
         x_hat = self.decoder(z)
         if self.residual:
             x_hat = x_hat + y
+        if self.final_activation is not None:
+            x_hat = self.final_activation(x_hat)
         return x_hat
