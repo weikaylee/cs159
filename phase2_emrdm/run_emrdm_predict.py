@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """
-Run EMRDM prediction on SEN12MSCR data and copy outputs to --output_dir.
+Run EMRDM prediction on the full SEN12MSCR dataset and copy outputs to --output_dir.
+
+Patches sentinel.yaml in-place with the checkpoint path, data root, and single-GPU
+prediction settings. Builds a single all_predict_paths.pkl with every available
+S1/S2/S2_cloudy triplet (no train/val/test split).
 
 Prerequisites
 -------------
@@ -15,8 +19,8 @@ Usage
     cd phase2_emrdm
     python run_emrdm_predict.py \
         --data_root /resnick/groups/perona/oywang/cs159/data \
-        --ckpt_path /resnick/groups/perona/oywang/cs159/emrdm_weights/train/sentinel/checkpoints \
-        --output_dir /resnick/groups/perona/oywang/cs159/output
+        --ckpt_path /resnick/groups/perona/oywang/cs159/emrdm_weights/train/sentinel/checkpoints/last.ckpt \
+        --output_dir /resnick/groups/perona/oywang/cs159/output/emrdm_predict
 """
 
 import argparse
@@ -34,6 +38,15 @@ import matplotlib.pyplot as plt
 from omegaconf import OmegaConf
 
 CODE_DIR = os.path.dirname(os.path.abspath(__file__))
+SENTINEL_YAML = os.path.join(CODE_DIR, "configs", "example_training", "sentinel.yaml")
+
+# All seasons present in SEN12MS-CR: (ROI-id, season-name)
+SEASONS = [
+    ("ROIs1158", "spring"),
+    ("ROIs1868", "summer"),
+    ("ROIs1970", "fall"),
+    ("ROIs2017", "winter"),
+]
 
 
 def check_prerequisites():
@@ -57,17 +70,8 @@ def check_prerequisites():
         sys.exit(1)
 
 
-# All seasons present in SEN12MS-CR: (ROI-id, season-name)
-SEASONS = [
-    ("ROIs1158", "spring"),
-    ("ROIs1868", "summer"),
-    ("ROIs1970", "fall"),
-    ("ROIs2017", "winter"),
-]
-
-
-def build_pkl_files(data_root):
-    """Scan data_root for aligned S1/S2/S2_cloudy triplets across all seasons."""
+def build_predict_pkl(data_root, max_samples=None):
+    """Scan data_root for all aligned S1/S2/S2_cloudy triplets. No split."""
     triplets = []
     found_seasons = []
 
@@ -100,18 +104,15 @@ def build_pkl_files(data_root):
     print(f"  Seasons found: {', '.join(found_seasons)}")
     print(f"  Total triplets: {len(triplets)}")
 
-    n = len(triplets)
-    splits = {
-        "train": triplets[:int(0.7 * n)],
-        "val":   triplets[int(0.7 * n):int(0.85 * n)],
-        "test":  triplets[int(0.85 * n):],
-    }
-    for split, data in splits.items():
-        out = os.path.join(data_root, f"all_{split}_paths.pkl")
-        with open(out, "wb") as f:
-            pickle.dump(data, f)
-        print(f"  {split}: {len(data)} samples → {out}")
-    return splits
+    if max_samples is not None:
+        triplets = triplets[:max_samples]
+        print(f"  Limiting to {len(triplets)} samples (--max_samples)")
+
+    out = os.path.join(data_root, "all_predict_paths.pkl")
+    with open(out, "wb") as f:
+        pickle.dump(triplets, f)
+    print(f"  {len(triplets)} triplets → {out}")
+    return len(triplets)
 
 
 def patch_natten():
@@ -141,7 +142,6 @@ def patch_natten():
         )
         verb = "applied (natten ≥ 0.21)"
     else:
-        # Revert if someone previously applied the 0.21 patch
         patched = code.replace(
             "if True:  # use natten 0.21.6 compatible layout",
             "if False:  # natten API compat",
@@ -154,30 +154,26 @@ def patch_natten():
     print(f"  natten patch: {verb} (installed: {pkg_version('natten')})")
 
 
-def write_hpc_config(data_root, ckpt_path):
-    """Derive sentinel_hpc.yaml from sentinel.yaml with correct paths for this run."""
-    src = os.path.join(CODE_DIR, "configs", "example_training", "sentinel.yaml")
-    dst = os.path.join(CODE_DIR, "configs", "example_training", "sentinel_hpc.yaml")
-
-    cfg = OmegaConf.load(src)
+def patch_sentinel_yaml(data_root, ckpt_path):
+    """Patch sentinel.yaml in-place: checkpoint path, data root, single-GPU predict."""
+    cfg = OmegaConf.load(SENTINEL_YAML)
 
     cfg.model.params.ckpt_path = ckpt_path
 
-    for split in ("train", "validation", "test", "predict"):
-        cfg.data.params[split].params.root = data_root
+    # predict uses all_predict_paths.pkl (split="predict") on a single GPU
+    cfg.data.params.predict.params.root = data_root
+    cfg.data.params.predict.params.split = "predict"
 
-    # Single GPU for prediction; trainer.devices=1 means "use 1 auto-selected GPU"
     cfg.lightning.trainer.devices = 1
 
-    OmegaConf.save(cfg, dst)
-    print(f"  Config written → {dst}")
-    return dst
+    OmegaConf.save(cfg, SENTINEL_YAML)
+    print(f"  Patched in-place: {SENTINEL_YAML}")
 
 
-def run_prediction(config_path):
+def run_prediction():
     cmd = [
         sys.executable, "main.py",
-        "--base", config_path,
+        "--base", SENTINEL_YAML,
         "--enable_tf32",
         "-t", "false",
         "--no-test", "true",
@@ -190,16 +186,28 @@ def run_prediction(config_path):
         sys.exit(result.returncode)
 
 
+def _season_of(fname):
+    for _, season in SEASONS:
+        if f"_{season}_" in fname:
+            return season
+    return "unknown"
+
+
+def _subdir_of(fname):
+    if fname.endswith("_mu.png"):
+        return "inputs"
+    if fname.endswith("_target.png"):
+        return "targets"
+    return "predictions"
+
+
 def collect_outputs(output_dir):
     """
-    Find the most recent logs/*/sample/ directory, copy all files to output_dir,
-    and write a results_comparison.png grid (up to 20 patches, 3 columns:
-    input mu | prediction | ground truth).
+    Copy predictions into output_dir/{season}/{predictions|targets|inputs}/ and
+    write a per-season results_comparison.png grid (up to 20 patches, 3 columns).
     """
     os.makedirs(output_dir, exist_ok=True)
 
-    # predict_step saves to logger.save_dir + "/sample/"
-    # CSVLogger.save_dir == logdir (e.g. logs/2026-05-25T12-00-00_sentinel_hpc)
     sample_dirs = sorted(glob.glob(os.path.join(CODE_DIR, "logs", "*", "sample")))
     if not sample_dirs:
         print("  No logs/*/sample/ directory found. Nothing to collect.")
@@ -210,41 +218,52 @@ def collect_outputs(output_dir):
     all_pngs = glob.glob(os.path.join(sample_dir, "*.png"))
     all_tifs = glob.glob(os.path.join(sample_dir, "*.tif"))
 
+    counts = {}
     for f in all_pngs + all_tifs:
-        shutil.copy2(f, os.path.join(output_dir, os.path.basename(f)))
-    print(f"  Copied {len(all_pngs)} PNGs + {len(all_tifs)} TIFs → {output_dir}")
+        fname = os.path.basename(f)
+        season = _season_of(fname)
+        subdir = _subdir_of(fname)
+        dest = os.path.join(output_dir, season, subdir)
+        os.makedirs(dest, exist_ok=True)
+        shutil.copy2(f, os.path.join(dest, fname))
+        counts[(season, subdir)] = counts.get((season, subdir), 0) + 1
 
-    # Build comparison grid: rows=patches, cols=[mu, prediction, target]
-    pred_pngs = [
-        f for f in all_pngs
-        if not os.path.basename(f).endswith("_mu.png")
-        and not os.path.basename(f).endswith("_target.png")
-    ]
-    patches = sorted({os.path.splitext(os.path.basename(f))[0] for f in pred_pngs})[:20]
-    if not patches:
-        print("  No prediction PNGs found — skipping comparison grid.")
-        return
+    for (season, subdir), n in sorted(counts.items()):
+        print(f"  {season}/{subdir}: {n} files")
 
-    fig, axes = plt.subplots(len(patches), 3, figsize=(12, 4 * len(patches)))
-    if len(patches) == 1:
-        axes = [axes]
+    # Per-season comparison grid
+    for _, season in SEASONS:
+        pred_dir = os.path.join(output_dir, season, "predictions")
+        if not os.path.isdir(pred_dir):
+            continue
+        pred_pngs = glob.glob(os.path.join(pred_dir, "*.png"))
+        patches = sorted({os.path.splitext(os.path.basename(f))[0] for f in pred_pngs})[:20]
+        if not patches:
+            continue
 
-    cols = [("_mu.png", "Input (mu)"), (".png", "Prediction"), ("_target.png", "Ground Truth")]
-    for i, patch in enumerate(patches):
-        for j, (suffix, title) in enumerate(cols):
-            candidates = glob.glob(os.path.join(sample_dir, f"{patch}{suffix}"))
-            if candidates:
-                axes[i][j].imshow(mpimg.imread(candidates[0]))
-                axes[i][j].set_title(f"{patch} — {title}", fontsize=8)
-            axes[i][j].axis("off")
+        _, axes = plt.subplots(len(patches), 3, figsize=(12, 4 * len(patches)))
+        if len(patches) == 1:
+            axes = [axes]
 
-    plt.tight_layout()
-    grid_path = os.path.join(output_dir, "results_comparison.png")
-    plt.savefig(grid_path, dpi=150)
-    plt.close()
-    print(f"  Saved comparison grid → {grid_path}")
+        cols = [
+            ("inputs",      "_mu.png",     "Input (mu)"),
+            ("predictions", ".png",        "Prediction"),
+            ("targets",     "_target.png", "Ground Truth"),
+        ]
+        for i, patch in enumerate(patches):
+            for j, (subdir, suffix, title) in enumerate(cols):
+                path = os.path.join(output_dir, season, subdir, patch + suffix)
+                if os.path.exists(path):
+                    axes[i][j].imshow(mpimg.imread(path))
+                    axes[i][j].set_title(f"{patch} — {title}", fontsize=8)
+                axes[i][j].axis("off")
 
-    # Also copy per-patch metrics CSV if present
+        plt.tight_layout()
+        grid_path = os.path.join(output_dir, season, "results_comparison.png")
+        plt.savefig(grid_path, dpi=150)
+        plt.close()
+        print(f"  Saved comparison grid → {grid_path}")
+
     metrics_csvs = glob.glob(os.path.join(os.path.dirname(sample_dir), "metrics.csv"))
     for f in metrics_csvs:
         shutil.copy2(f, os.path.join(output_dir, "predict_metrics.csv"))
@@ -252,10 +271,10 @@ def collect_outputs(output_dir):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Run EMRDM prediction on SEN12MSCR data.")
+    parser = argparse.ArgumentParser(description="Run EMRDM prediction on full SEN12MSCR dataset.")
     parser.add_argument(
         "--data_root", required=True,
-        help="Root dir containing ROIs1158_spring_s2/, ROIs1158_spring_s1/, ROIs1158_spring_s2_cloudy/",
+        help="Root dir containing ROIs*_s2/, ROIs*_s1/, ROIs*_s2_cloudy/ season directories",
     )
     parser.add_argument(
         "--ckpt_path", required=True,
@@ -267,7 +286,11 @@ def main():
     )
     parser.add_argument(
         "--skip_pkl", action="store_true",
-        help="Skip pkl rebuild if all_train/val/test_paths.pkl already exist",
+        help="Skip pkl rebuild if all_predict_paths.pkl already exists",
+    )
+    parser.add_argument(
+        "--max_samples", type=int, default=None,
+        help="Limit prediction to first N samples (useful for test runs)",
     )
     args = parser.parse_args()
 
@@ -278,23 +301,21 @@ def main():
         print(f"ERROR: checkpoint not found: {args.ckpt_path}")
         sys.exit(1)
 
-    print("\n=== [1/4] Building triplet pkl files ===")
-    if args.skip_pkl and all(
-        os.path.exists(os.path.join(args.data_root, f"all_{s}_paths.pkl"))
-        for s in ("train", "val", "test")
-    ):
-        print("  pkl files already exist — skipping (--skip_pkl).")
+    print("\n=== [1/4] Building predict pkl (full dataset) ===")
+    pkl_path = os.path.join(args.data_root, "all_predict_paths.pkl")
+    if args.skip_pkl and os.path.exists(pkl_path):
+        print(f"  {pkl_path} already exists — skipping (--skip_pkl).")
     else:
-        build_pkl_files(args.data_root)
+        build_predict_pkl(args.data_root, max_samples=args.max_samples)
 
     print("\n=== [2/4] Patching natten API ===")
     patch_natten()
 
-    print("\n=== [3/4] Writing HPC config ===")
-    config_path = write_hpc_config(args.data_root, args.ckpt_path)
+    print("\n=== [3/4] Patching sentinel.yaml ===")
+    patch_sentinel_yaml(args.data_root, args.ckpt_path)
 
     print("\n=== [4/4] Running EMRDM prediction ===")
-    run_prediction(config_path)
+    run_prediction()
 
     print(f"\n=== Collecting outputs → {args.output_dir} ===")
     collect_outputs(args.output_dir)
