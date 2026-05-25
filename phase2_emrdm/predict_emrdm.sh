@@ -31,7 +31,7 @@ mkdir -p "$OUTPUT_ROOT"
 cd "$CODE_DIR"
 python run_emrdm_predict.py \
         --data_root /resnick/groups/perona/oywang/cs159/data \
-        --ckpt_path /resnick/groups/perona/oywang/cs159/emrdm_weights/train/sentinel/checkpoints \
+        --ckpt_path /resnick/groups/perona/oywang/cs159/emrdm_weights/train/sentinel/checkpoints/last.ckpt \
         --output_dir /resnick/groups/perona/oywang/cs159/output/emrdm_predict
 EMRDM_EXIT=$?
 if [ $EMRDM_EXIT -ne 0 ]; then
