@@ -23,7 +23,7 @@
 #SBATCH --gres=gpu:1
 #SBATCH --mem=64G
 #SBATCH --partition=gpu
-#SBATCH --time=12:00:00
+#SBATCH --time=60:00:00
 
 #SBATCH -J "phase1-stage2-coarse"
 #SBATCH --mail-user=oywang@caltech.edu
@@ -50,10 +50,10 @@ python "$CODE_DIR/run_loss_ablation.py" \
     --data_root    "$DATA_ROOT" \
     --output_root  "$OUTPUT_ROOT" \
     --roi          all \
-    --epochs       15 \
-    --batch_size   16 \
-    --lr           2e-4 \
-    --num_workers  8 \
+    --epochs       3 \
+    --batch_size   64 \
+    --lr           8e-4 \
+    --num_workers  2 \
     --max_sigma    0.1 \
     --fp16 \
     --wandb --wandb_project cs159 --wandb_prefix "stage2-" \
