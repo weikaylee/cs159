@@ -2,6 +2,12 @@
 # Phase 1 loss-ablation: best VGG and best Spectral config only (single jobs, not array)
 # This script runs one VGG-style and one Spectral-style config with optimal settings.
 #
+# Time estimate: observed ~6 s/step at 256×256 with NaN training (no weight updates).
+# With real gradient flow at --patch_size 64 (NAMM official resolution, ~8-10x faster
+# spatially), expect ~1-2 s/step → ~25 epochs in ~24 h per config.  Both configs run
+# in parallel on separate GPUs, so wall time equals one config's training time.
+# If step time differs significantly, adjust --epochs and --time accordingly.
+#
 # TODO EDIT BEFORE SUBMITTING: --epochs, --mail-user, --partition, and the paths below.
 
 #SBATCH --nodes=1
@@ -33,11 +39,12 @@ CUDA_VISIBLE_DEVICES=0 python "$CODE_DIR/run_loss_ablation.py" \
     --data_root    "$DATA_ROOT" \
     --output_root  "$OUTPUT_ROOT/vgg" \
     --roi          all \
-    --epochs       2 \
+    --epochs       25 \
     --batch_size   16 \
     --lr           2e-4 \
     --num_workers  8 \
     --max_sigma    0.1 \
+    --patch_size   64 \
     --fp16 \
     --wandb --wandb_project cs159 --wandb_prefix "ablation-vgg-" \
     --style_weight 100 \
@@ -51,11 +58,12 @@ CUDA_VISIBLE_DEVICES=1 python "$CODE_DIR/run_loss_ablation.py" \
     --data_root    "$DATA_ROOT" \
     --output_root  "$OUTPUT_ROOT/spectral" \
     --roi          all \
-    --epochs       2 \
+    --epochs       25 \
     --batch_size   16 \
     --lr           2e-4 \
     --num_workers  8 \
     --max_sigma    0.1 \
+    --patch_size   64 \
     --fp16 \
     --wandb --wandb_project cs159 --wandb_prefix "ablation-spectral-" \
     --sam_weight   1 \

@@ -59,9 +59,15 @@ class VGGFeatureExtractor(nn.Module):
 
     def forward(self, x: torch.Tensor) -> dict:
         """Return dict with style feature list and content feature map."""
+        # Cast to float32: fp16 Gram entries reach O(a² × H × W) which overflows
+        # fp16 max (~65504) when activations a are O(10–100) at init.
+        x = x.float()
         # Sentinel-2 RGB bands (1-indexed): B02=Blue, B03=Green, B04=Red
         # Convert to 0-index: [1, 2, 3], ordered as RGB: [Red, Green, Blue]
-        h = x[:, [3, 2, 1], ...]
+        # Clamp to [0, 1] before ImageNet normalisation: f_psi outputs can exceed
+        # 1.0 early in training (residual + ReLU, no upper bound), which drives
+        # VGG activations into O(100+) and causes Gram overflow.
+        h = x[:, [3, 2, 1], ...].clamp(0.0, 1.0)
         # Normalise to ImageNet stats
         mean = torch.tensor([0.485, 0.456, 0.406],
                              device=x.device).view(1, 3, 1, 1)
@@ -211,79 +217,44 @@ def gram_matrix(feat: torch.Tensor) -> torch.Tensor:
     return torch.bmm(f, f.transpose(1, 2))
 
 
-# ── Design note: a scale-invariant alternative to the Gatys L_style ──────────
+# ── Design note: scale-invariant l_style vs. Gatys ───────────────────────────
 #
-# The Gatys formula below normalises by 4·C²·H²·W² but the Gram entries
-# themselves scale as O(M·a²) (M = H·W, a = activation magnitude), so per
-# layer the loss scales as O(a⁴). On ImageNet-normalised Sentinel-2 RGB with
-# VGG-19 ReLU activations of O(10–100), L_style lands at ~1e7 per layer; at
-# the paper-recommended `style_weight=100` it contributes ~1e9 to the
-# constraint loss while cycle (~24), recon (~0.5), and the spectral terms
-# (~0.5) sit 6–7 orders of magnitude below. The imbalance is worse at init:
-# untrained `f_psi` outputs land in [0, ~40] (the `InverseMap` residual
-# passes the mirror-space y through, ReLU clips only negatives), so
-# ‖G_gen‖ ≫ ‖G_ref‖ and any one-sided relative form like
-# ‖ΔG‖² / ‖G_ref‖² also diverges.
+# The Gatys formula normalises by 4·C²·H²·W² but Gram entries scale as
+# O(M·a²) (M = H·W, a = activation magnitude), so l_style scales as O(a⁴).
+# With VGG-19 ReLU activations of O(10–100) at init (f_psi residual adds back
+# the mirror-space input, so outputs are not bounded to [0,1] early in
+# training), l_style lands at ~1e7 per layer; at style_weight=100 it
+# contributes ~1e9 to the constraint loss while cycle (~24) and spectral terms
+# (~0.5) sit 6–7 orders of magnitude below, preventing any gradient signal.
+# In fp16 the Gram entries overflow outright (fp16 max ≈ 65504; a single entry
+# reaches O(a² × H × W) >> 65504), producing NaN from step 0.
 #
-# A symmetric cosine-distance variant (unit-Frobenius-normalise both Grams,
-# then squared diff) bounds the per-layer loss in [0, 4] regardless of
-# activation scale. It discards Gram-magnitude information that the Gatys
-# formula encodes, but that magnitude signal is already captured elsewhere
-# in the constraint distance — `l_recon` (pixel-MSE) and `l_moments`
-# (per-band mean / std matching). The project keeps the Gatys formulation
-# below so style stays faithful to SatelliteMaker's Eq. 6; uncomment the
-# block below to switch back to the bounded variant.
-#
-# def l_style(
-#     feats_gen: list[torch.Tensor],
-#     feats_ref: list[torch.Tensor],
-#     weights: list[float] | None = None,
-#     eps: float = 1e-8,
-# ) -> torch.Tensor:
-#     """Scale-invariant style loss: cosine distance between Gram matrices.
-#
-#     L_style = sum_l w_l · ‖G_gen/‖G_gen‖ − G_ref/‖G_ref‖‖_F²,  in [0, 4].
-#     """
-#     if weights is None:
-#         weights = [1.0] * len(feats_gen)
-#     if len(weights) != len(feats_gen):
-#         raise ValueError("Style weights must match number of feature maps.")
-#     loss = torch.zeros((), device=feats_gen[0].device)
-#     for fg, fr, w in zip(feats_gen, feats_ref, weights):
-#         Gg = gram_matrix(fg)
-#         Gr = gram_matrix(fr)
-#         ng = Gg.flatten(1).norm(dim=1).clamp(min=eps).view(-1, 1, 1)
-#         nr = Gr.flatten(1).norm(dim=1).clamp(min=eps).view(-1, 1, 1)
-#         diff_sq = (Gg / ng - Gr / nr).pow(2).sum(dim=(1, 2))
-#         loss = loss + w * diff_sq.mean()
-#     return loss
-
+# The cosine-distance variant below unit-Frobenius-normalises both Grams before
+# differencing, bounding l_style in [0, 4] regardless of activation scale.
+# Gram-magnitude information is already captured by l_recon and l_moments.
 
 def l_style(
     feats_gen: list[torch.Tensor],
     feats_ref: list[torch.Tensor],
     weights: list[float] | None = None,
+    eps: float = 1e-8,
 ) -> torch.Tensor:
-    """Gram-matrix style loss over style layers (paper Eq. 6).
+    """Scale-invariant style loss: cosine distance between Gram matrices.
 
-    L_style = sum_l  w_l * (1 / (4 C_l^2 H_l^2 W_l^2)) * || G_gen^l - G_ref^l ||_F^2
-
+    L_style = sum_l w_l · ‖G_gen/‖G_gen‖_F − G_ref/‖G_ref‖_F‖_F², in [0, 4].
     """
     if weights is None:
         weights = [1.0] * len(feats_gen)
     if len(weights) != len(feats_gen):
         raise ValueError("Style weights must match number of feature maps.")
-
     loss = torch.zeros((), device=feats_gen[0].device)
     for fg, fr, w in zip(feats_gen, feats_ref, weights):
-        _, C, H, W = fg.shape
         Gg = gram_matrix(fg)
         Gr = gram_matrix(fr)
-        # Squared Frobenius norm of the Gram difference, per sample
-        diff_sq = (Gg - Gr).pow(2).sum(dim=(1, 2))           # (B,)
-        # Paper's normalisation: 1 / (4 C^2 H^2 W^2)
-        denom = 4.0 * (C ** 2) * (H ** 2) * (W ** 2)
-        loss = loss + w * diff_sq.mean() / denom
+        ng = Gg.flatten(1).norm(dim=1).clamp(min=eps).view(-1, 1, 1)
+        nr = Gr.flatten(1).norm(dim=1).clamp(min=eps).view(-1, 1, 1)
+        diff_sq = (Gg / ng - Gr / nr).pow(2).sum(dim=(1, 2))
+        loss = loss + w * diff_sq.mean()
     return loss
 
 
