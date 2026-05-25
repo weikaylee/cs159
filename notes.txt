@@ -1,4 +1,3 @@
-vgg loss
 vgg = visual geometry group network
 VGG is a deep convolutional neural network architecture developed 
 by the Visual Geometry Group at Oxford University in 2014. 
@@ -80,4 +79,61 @@ If you put distribution loss on conv1_1, you'd basically just be re-doing style 
 conv4_2 is the sweet spot: deep enough to be about content rather than texture, shallow enough to still care about local composition.
 
 Style lives in the low-to-mid layers because texture is a local phenomenon. Content/semantics live in deep layers because meaning requires global context. Distribution loss attaches to whichever level you want aligned across the dataset.
+
+ICNN notes
+icnn = A standard neural network takes an input and produces an output through a forward pass. 
+An ICNN does something different: it's designed so that its output is a convex function of some (or all) of its inputs. 
+This means you can treat the network like an energy function and optimize over the inputs to find the best prediction.
+
+Key constraints to ensure convexity:
+All W^(z) weights (connecting hidden layers) must be non-negative
+Activation functions g_i must be convex and non-decreasing (ReLU satisfies this naturally)
+
+Role of ICNN in namm:
+The NAMM paper needs a forward mirror map g_ϕ that takes constrained data and transforms it into an unconstrained "mirror" space, 
+where a regular diffusion model can be trained. The key mathematical requirement for a true mirror map is that it must be the gradient 
+of a strongly convex function — this is what guarantees the map is invertible (by Legendre-Fenchel duality).
+
+ICNNs are used to parameterize g_ϕ. Specifically, g_ϕ is implemented as the gradient of a strongly input-convex neural network, 
+following the implementation of Tan et al. (2023). This is a direct application of the ICNN paper's architecture: 
+since an ICNN h(x) is convex in its input, its gradient ∇h(x) is a well-defined, monotone map — exactly the structure a mirror map requires.
+    - ie, For convex constraints, using the gradient of an ICNN satisfies the formal definition of a mirror map. 
+    The convexity of the ICNN ensures the gradient map is injective (one-to-one), which is necessary for the inverse map f_ψ 
+    to exist and be learnable.
+    - Practical (even for non-convex constraints): Even when the constraint set is non-convex using an ICNN-based forward map 
+    empirically outperforms using a plain ResNet (which is what inverse map uses). The paper's ablation study 
+    shows that a ResNet-based forward map produces a less regularized, "patchier" mirror space that the diffusion model 
+    struggles to learn, whereas the ICNN produces a smoother, better-structured mirror space with fewer outliers in constraint satisfaction. 
+    The authors conclude: "even when the constraint is non-convex and there are no theoretical reasons to use an ICNN, it may still be practically favorable."
+        - (inverse function does not necessarily have to be gradient of convex func; see mirror map section of paper)
+
+important for icnn code (from icnn paper, by amos et al):
+- Proposition 1. The function f is convex in y provided that all weights
+are non-negative, and all functions gi (nonlinearities/activation functions) are convex and non-decreasing (eg, relu or leaky relu).
+
+intuition: icnn is a convex invertible function that maps input image to some scalar (call this the potential). 
+we take the gradient of the convex to use as our forward map in namm, because 
+the gradient has dim (C, B, H, W), where each pixel represents how much the scalar potential changes for some perturbation
+
+strong convexiy hyperparam (alpha):
+namm paper chooses alpha = 0.9
+
+Alpha controls a direct tradeoff between expressiveness and invertibility safety:
+
+High alpha (e.g. 0.9): map is close to identity, easy to invert, but has limited ability to reshape the data distribution. Works well when the constraint is relatively mild (e.g. total brightness, periodicity).
+Low alpha (e.g. 0.1): map can reshape the distribution substantially, potentially handling complex constraints better, but the ICNN network must do more work and training becomes harder. The inverse map f_psi also faces a harder problem.
+
+The NAMM paper's choice of alpha = 0.9 reflects the philosophy that the mirror map should be a gentle, reliable transformation — just enough to move constrained data into an unconstrained region — 
+rather than a radical reparameterization of the data space.
+
+Compared to ordinary convexity (which just requires the right-hand side without the last term), strong convexity says the function grows at least as fast as a quadratic away from any point. It is strictly more curved than a flat line.
+
+by def, mirror map must be strongly convex, which allows inverse of forward map to actulally exist
+
+old implementation of icnn.py didn't follow icnn layer implementation of Tan et al, which is what namm paper says it uses 
+(includes a w * x^2 term, which old implementation didn't have; it just had simple linear term w*x). the namm impl has this term too, which 
+makes the icnn (convex function) more curvy and "more convex" ... i think
+
+the old impl is still a (mostly) correct icnn implemtnation that faithfully follows amos et al eqns, but not tan et al impl -- namm uses the tan et al impl, 
+as shown in namm/icnn.py
 
