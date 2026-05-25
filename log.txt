@@ -85,3 +85,55 @@ fix: Replace the Gatys denominator with a per-layer relative-error formulation:
  channel co-activation patterns — just unit-free.
 
  gram_matrix stays as the raw F F^T; normalization is l_style's job.
+
+5/25 wandb ablation logging + NaN fix + sweep stage scripts
+
+wandb logging for run_loss_ablation.py:
+- collate() now returns sorted rows so the caller can use them
+- added log_ablation_to_wandb() — creates a dedicated wandb summary run after
+  collation that logs: wandb.Table of all configs ranked by val_loss, best-config
+  scalars (best_val_loss/mae/sam/psnr/ssim), and ablation_summary.csv as an artifact
+- both the full sweep path and --collate_only now call log_ablation_to_wandb when
+  --wandb is set
+- run_loss_ablation_no_sweep.sh: added --wandb_prefix "ablation-vgg-" and
+  "ablation-spectral-" so the two summary runs don't collide as "ablation-summary"
+
+stage sweep scripts (phase1_mirror_map/):
+- stage2_coarse_sweep.sh: slurm array 0-17, 15 epochs, one GPU per config. includes
+  collation dependency command in comments (sbatch --dependency=afterany:...)
+- stage3_top_configs.sh: 3 GPUs in parallel, 100 epochs; edit CONFIG1/2/3 with top
+  config names from stage 2 ablation_summary.csv sorted by val_sam (not val_loss)
+- stage4_fine_sweep.sh: slurm array, 100 epochs, fine grid around stage 3 winner.
+  set FAMILY=vgg or spectral and submit with --array=0-8 (vgg) or --array=9-17
+  (spectral); vgg grid: style in {50,100,200} x dis in {0.5,1,2}; spectral grid:
+  sam and moment both in {0.5,1,2}
+
+constr=nan fix (losses.py):
+problem: training logs showed constr=nan and loss=nan from step 0 for all 600+ steps,
+meaning weights were NEVER updated (GradScaler skips optimizer.step when grads are nan)
+
+root causes:
+1. fp16 overflow in VGG gram matrices: f_psi at init outputs ReLU(decoder + y_noisy)
+   where y_noisy = g_phi(x) + sigma*z. g_phi at init can produce large values, so
+   y_noisy is not bounded to [0,1]. a pixel value of 40 becomes ~172 after ImageNet
+   normalization (std~0.2). Gram entry = sum_hw(f_c1 * f_c2) ~ 172^2 * H * W which
+   blows past fp16 max (65504) -> NaN immediately
+2. l_style magnitude explosion: even in float32, Gatys l_style ~ 1e7/layer, at
+   style_weight=100 contributes ~1e9 to loss vs cycle~24 and spectral~0.5 (7-8 orders
+   of magnitude imbalance). prevents any gradient signal from non-VGG terms
+3. VGG receiving out-of-range inputs: reflectances should be [0,1] but f_psi output
+   is unbounded above 1.0 at init
+
+fixes in losses.py:
+- VGGFeatureExtractor.forward: x = x.float() at start (upcast from fp16 before gram)
+- VGGFeatureExtractor.forward: .clamp(0.0, 1.0) on RGB bands before ImageNet norm
+- l_style: replaced Gatys formula with cosine-distance (unit-Frobenius-normalise both
+  Grams before differencing). result is bounded in [0, 4] regardless of activation
+  scale. Gram-magnitude info already captured by l_recon and l_moments
+
+run_loss_ablation_no_sweep.sh timing fix:
+- observed 6.1 s/step at 256x256 with NaN training (no weight updates, 0 learning)
+- with real backprop at 256x256: ~12-15 s/step -> 2 epochs would need ~46h (was set to 24h)
+- fix: add --patch_size 64 (official NAMM resolution per CLAUDE.md; ~8-10x faster spatially)
+- update --epochs 2 -> 25 (2 epochs provided no convergence signal since weights never updated)
+- --time=24:00:00 stays correct for 25 epochs at patch_size=64 (~1-2 s/step estimated)
