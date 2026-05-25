@@ -115,23 +115,43 @@ def build_pkl_files(data_root):
 
 
 def patch_natten():
-    """Switch image_transformer.py from natten 0.17 to 0.21.6 tensor layout."""
+    """
+    Ensure image_transformer.py uses the natten API matching the installed version.
+
+    natten 0.17.x (torch220cu121): uses (n, nh, h, w, e) layout — the default
+      'if False' branch in the code; no patch needed.
+    natten 0.21.x (torch2100cu128): uses (n, h, w, nh, e) layout — requires
+      switching the branch to 'if True'.
+    """
+    from importlib.metadata import version as pkg_version
+    natten_ver = tuple(int(x) for x in pkg_version("natten").split("+")[0].split(".")[:2])
+    need_021_patch = natten_ver >= (0, 21)
+
     transformer_path = os.path.join(
         CODE_DIR, "sgm", "modules", "diffusionmodules",
         "k_diffusion", "image_transformer.py"
     )
     with open(transformer_path) as f:
         code = f.read()
-    patched = code.replace(
-        "if False:  # natten API compat",
-        "if True:  # use natten 0.21.6 compatible layout",
-    )
-    if patched == code:
-        print("  natten patch: already applied or marker not found — skipping.")
+
+    if need_021_patch:
+        patched = code.replace(
+            "if False:  # natten API compat",
+            "if True:  # use natten 0.21.6 compatible layout",
+        )
+        verb = "applied (natten ≥ 0.21)"
     else:
+        # Revert if someone previously applied the 0.21 patch
+        patched = code.replace(
+            "if True:  # use natten 0.21.6 compatible layout",
+            "if False:  # natten API compat",
+        )
+        verb = "reverted to 0.17 layout" if patched != code else "not needed (natten 0.17 default)"
+
+    if patched != code:
         with open(transformer_path, "w") as f:
             f.write(patched)
-        print("  natten patch: applied.")
+    print(f"  natten patch: {verb} (installed: {pkg_version('natten')})")
 
 
 def write_hpc_config(data_root, ckpt_path):
