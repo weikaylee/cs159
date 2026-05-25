@@ -51,8 +51,8 @@ python "$CODE_DIR/run_loss_ablation.py" \
     --output_root  "$OUTPUT_ROOT" \
     --roi          all \
     --epochs       3 \
-    --batch_size   64 \
-    --lr           8e-4 \
+    --batch_size   32 \
+    --lr           4e-4 \
     --num_workers  2 \
     --max_sigma    0.1 \
     --fp16 \
