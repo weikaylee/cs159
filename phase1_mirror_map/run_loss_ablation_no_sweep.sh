@@ -13,7 +13,7 @@
 #SBATCH --time=24:00:00
 #SBATCH -J "phase1-loss-ablation-best"
 #SBATCH --mail-user=oywang@caltech.edu
-#SBATCH --mail-type=BEGIN, END
+#SBATCH --mail-type=BEGIN,END
 #SBATCH --mail-type=FAIL
 #SBATCH --output=/resnick/groups/perona/oywang/cs159/logs/slurm-loss-ablation-best-%j.out
 #SBATCH --error=/resnick/groups/perona/oywang/cs159/logs/slurm-loss-ablation-best-%j.err
