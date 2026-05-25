@@ -270,8 +270,8 @@ def best_val_row(history_path: str) -> dict | None:
     return best
 
 
-def collate(configs: list[dict], output_root: str) -> None:
-    """Write ablation_summary.csv and print a ranked table."""
+def collate(configs: list[dict], output_root: str) -> list[dict]:
+    """Write ablation_summary.csv and print a ranked table. Returns sorted rows."""
     rows = []
     for cfg in configs:
         row = {
@@ -324,6 +324,66 @@ def collate(configs: list[dict], output_root: str) -> None:
               f"{r['sam_weight']:>5} {r['moment_weight']:>5} "
               f"{fmt('val_loss'):>10} {fmt('val_psnr'):>9} "
               f"{fmt('val_sam'):>9} {fmt('val_ssim'):>9}  {r['status']}")
+    return rows
+
+
+def log_ablation_to_wandb(rows: list[dict], output_root: str, args) -> None:
+    """Log the collated ablation summary to a dedicated wandb summary run."""
+    import wandb
+
+    run_name = f"{args.wandb_prefix}summary"
+    wandb.init(
+        project=args.wandb_project,
+        name=run_name,
+        entity=args.wandb_entity,
+        job_type='ablation-summary',
+    )
+
+    columns = ['rank', 'config', 'family',
+               'dis_weight', 'style_weight', 'sam_weight', 'moment_weight',
+               'best_epoch', 'val_loss', 'val_mae', 'val_sam', 'val_psnr', 'val_ssim',
+               'status']
+    table = wandb.Table(columns=columns)
+
+    def _f(v: str) -> float | str:
+        try:
+            return float(v)
+        except (ValueError, TypeError):
+            return v or '-'
+
+    for rank, r in enumerate(rows, 1):
+        table.add_data(
+            rank, r['config'], r['family'],
+            _f(r['dis_weight']), _f(r['style_weight']),
+            _f(r['sam_weight']), _f(r['moment_weight']),
+            _f(r['best_epoch']),
+            _f(r['val_loss']), _f(r['val_mae']), _f(r['val_sam']),
+            _f(r['val_psnr']), _f(r['val_ssim']),
+            r['status'],
+        )
+
+    wandb.log({'ablation/results': table})
+
+    # Log best-config scalars for easy dashboard comparison.
+    best = next((r for r in rows if r['status'] == 'ok'), None)
+    if best is not None:
+        wandb.summary.update({
+            'best_config': best['config'],
+            'best_val_loss': _f(best['val_loss']),
+            'best_val_mae': _f(best['val_mae']),
+            'best_val_sam': _f(best['val_sam']),
+            'best_val_psnr': _f(best['val_psnr']),
+            'best_val_ssim': _f(best['val_ssim']),
+        })
+
+    summary_path = os.path.join(output_root, 'ablation_summary.csv')
+    if os.path.isfile(summary_path):
+        artifact = wandb.Artifact('ablation_summary', type='dataset')
+        artifact.add_file(summary_path)
+        wandb.log_artifact(artifact)
+
+    wandb.finish()
+    print(f'\nWandb summary run logged as {run_name!r} in project {args.wandb_project!r}.')
 
 
 def print_config_table(configs: list[dict]) -> None:
@@ -378,7 +438,9 @@ def main() -> None:
         return
 
     if args.collate_only:
-        collate(configs, args.output_root)
+        rows = collate(configs, args.output_root)
+        if args.wandb:
+            log_ablation_to_wandb(rows, args.output_root, args)
         return
 
     if args.data_root is None:
@@ -400,7 +462,9 @@ def main() -> None:
     # Single-config (array-task) mode: don't collate — that would race with
     # sibling tasks on ablation_summary.csv. Run --collate_only after the array.
     if args.config_index is None:
-        collate(configs, args.output_root)
+        rows = collate(configs, args.output_root)
+        if args.wandb:
+            log_ablation_to_wandb(rows, args.output_root, args)
 
     if failures:
         print(f'\n{len(failures)} config(s) failed: {", ".join(failures)}',

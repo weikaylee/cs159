@@ -115,7 +115,7 @@ data:
     train:
       target: sgm.data.sentinel.sentinel.SEN12MSCRInterface
       params:
-        root: "/remote-home/share/dmb_nas2/liuyi/SEN12MSCR"
+        root: "/resnick/groups/perona/oywang/cs159/data"
         split: "train"
         region: "all"
         rescale: True
@@ -124,7 +124,7 @@ data:
     validation:
       target: sgm.data.sentinel.sentinel.SEN12MSCRInterface
       params:
-        root: "/remote-home/share/dmb_nas2/liuyi/SEN12MSCR"
+        root: "/resnick/groups/perona/oywang/cs159/data"
         split: "val"
         region: "all"
         rescale: True
@@ -133,7 +133,7 @@ data:
     test:
       target: sgm.data.sentinel.sentinel.SEN12MSCRInterface
       params:
-        root: "/remote-home/share/dmb_nas2/liuyi/SEN12MSCR"
+        root: "/resnick/groups/perona/oywang/cs159/data"
         split: "test"
         region: "all"
         rescale: True
@@ -142,7 +142,7 @@ data:
     predict:
       target: sgm.data.sentinel.sentinel.SEN12MSCRInterface
       params:
-        root: "/remote-home/share/dmb_nas2/liuyi/SEN12MSCR"
+        root: "/resnick/groups/perona/oywang/cs159/data"
         split: "test"
         region: "all"
         rescale: True
@@ -178,7 +178,7 @@ lightning:
           return_cond: True
 
   trainer:
-    devices: 2,4
+    devices: 2
     num_sanity_val_steps: 2
     benchmark: True
     accumulate_grad_batches: 1

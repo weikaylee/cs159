@@ -28,16 +28,12 @@ CODE_DIR="/resnick/groups/perona/oywang/cs159/phase2_emrdm"
 OUTPUT_ROOT="/resnick/groups/perona/oywang/cs159/runs/emrdm_predict"
 mkdir -p "$OUTPUT_ROOT"
 
-
-CUDA_VISIBLE_DEVICES=0 python main.py\
- --base configs/example_training/sentinel.yaml \
- --enable_tf32 -t false --no-test true --predict true
-EMRDM_PID=$!
-
-# ── Wait for both and propagate failures ────────────────────────────────────
-wait $EMRDM_PID
+cd "$CODE_DIR"
+python main.py \
+    --base configs/example_training/sentinel.yaml \
+    --enable_tf32 -t false --no-test true --predict true
 EMRDM_EXIT=$?
 if [ $EMRDM_EXIT -ne 0 ]; then
-    echo "ERROR: EMRDM prediction job failed with exit code $EMRDM_EXIT"
+    echo "ERROR: EMRDM prediction job failed with exit code $EMRDM_EXIT" >&2
     exit $EMRDM_EXIT
 fi
