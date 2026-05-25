@@ -63,7 +63,7 @@ echo "  Data root:  ${DATA_ROOT}"
 echo "  Output dir: ${OUTPUT_DIR}"
 echo "  Start:      $(date)"
 echo "===================="
-nvidia-smi --query-gpu=name,memory.total --format=csv,noheader 2>/dev/null || echo "  nvidia-smi: no GPU visible"
+nvidia-smi --query-gpu=name,memory.total,driver_version,compute_cap --format=csv,noheader 2>/dev/null || echo "  nvidia-smi: no GPU visible"
 python -c "
 import jax
 try:
@@ -71,6 +71,7 @@ try:
 except Exception as e:
     print('JAX devices error:', e)
 "
+export XLA_FLAGS="--xla_gpu_strict_conv_algorithm_picker=false"
 
 python train_namm.py \
     --config                  configs/sen12mscr_config.py \
