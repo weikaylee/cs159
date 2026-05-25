@@ -39,7 +39,7 @@ CUDA_VISIBLE_DEVICES=0 python "$CODE_DIR/run_loss_ablation.py" \
     --num_workers  8 \
     --max_sigma    0.1 \
     --fp16 \
-    --wandb --wandb_project cs159 \
+    --wandb --wandb_project cs159 --wandb_prefix "ablation-vgg-" \
     --style_weight 100 \
     --dis_weight   1 \
     --sam_weight   0 \
@@ -57,7 +57,7 @@ CUDA_VISIBLE_DEVICES=1 python "$CODE_DIR/run_loss_ablation.py" \
     --num_workers  8 \
     --max_sigma    0.1 \
     --fp16 \
-    --wandb --wandb_project cs159 \
+    --wandb --wandb_project cs159 --wandb_prefix "ablation-spectral-" \
     --sam_weight   1 \
     --moment_weight 1 \
     --style_weight 0 \
