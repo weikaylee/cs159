@@ -12,20 +12,20 @@
 #SBATCH --partition=gpu
 #SBATCH --time=24:00:00
 #SBATCH -J "phase1-loss-ablation-best"
-#SBATCH --mail-user=kwei2@caltech.edu
-#SBATCH --mail-type=END
+#SBATCH --mail-user=oywang@caltech.edu
+#SBATCH --mail-type=BEGIN, END
 #SBATCH --mail-type=FAIL
-#SBATCH --output=slurm-loss-ablation-best-%j.out
-#SBATCH --error=slurm-loss-ablation-best-%j.err
+#SBATCH --output=/resnick/groups/perona/oywang/cs159/logs/slurm-loss-ablation-best-%j.out
+#SBATCH --error=/resnick/groups/perona/oywang/cs159/logs/slurm-loss-ablation-best-%j.err
 
 # ── Environment ──────────────────────────────────────────────────────────────
 source ~/.bashrc
 conda activate emrdm
 
 # ── Paths ────────────────────────────────────────────────────────────────────
-DATA_ROOT="/resnick/groups/CS156b/from_central/2026/SSSClassCSNerds/cs159/data"
-CODE_DIR="/resnick/groups/CS156b/from_central/2026/SSSClassCSNerds/cs159/phase1_mirror_map"
-OUTPUT_ROOT="/resnick/groups/CS156b/from_central/2026/SSSClassCSNerds/cs159/runs/loss_ablations_no_sweep"
+DATA_ROOT="/resnick/groups/perona/oywang/cs159/data"
+CODE_DIR="/resnick/groups/perona/oywang/cs159/phase1_mirror_map"
+OUTPUT_ROOT="/resnick/groups/perona/oywang/cs159/runs/loss_ablations_no_sweep"
 mkdir -p "$OUTPUT_ROOT"
 
 # ── Best VGG config ─────────────────────────────────────────────────────────
