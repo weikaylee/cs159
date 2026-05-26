@@ -1,0 +1,139 @@
+vgg = visual geometry group network
+VGG is a deep convolutional neural network architecture developed 
+by the Visual Geometry Group at Oxford University in 2014. 
+It was designed for image recognition and became famous for its simplicity: 
+it uses only small 3×3 convolutional filters stacked in increasing depth.
+
+When used for neural style transfer, VGG-19 is not trained — its pre-trained weights 
+(from ImageNet) are frozen and used as a feature extractor. The idea is to exploit what 
+the network already "knows" about images.
+
+earlier layers catpure "fine grain" details, ie structural info about image
+later layers capture more abstract details
+
+for style transfer, we care more about earlier layers and thus give them higher weights
+than later layers
+
+distribution loss:
+uses reproducing kernel hilbert space, which is a vector space with a notion of distance 
+and angle (an inner product), that is also "complete" (no gaps). Think of it as a well-behaved 
+infinite-dimensional generalization of regular Euclidean space where you can measure how far apart two points are.
+
+gaussian kernel: you get the geometric benefits of a high-dimensional space cheaply.
+
+Why is Hilbert Space needed here?
+The core problem is: raw feature maps are hard to compare as distributions.
+If you just compared feature maps directly (e.g. pixel-by-pixel or vector subtraction), you'd only capture point-to-point differences, not whether the two distributions are similar.
+By mapping features into RKHS via ϕ\phi
+ϕ, you can compute the **Mean Maximum Discrepancy (MMD)** — essentially the distance between the *mean embeddings* of two distributions (this is the loss in the paper)
+This works because in RKHS:
+
+The mean embedding of a distribution captures all its statistical moments
+Two distributions are identical if and only if their mean embeddings are equal
+The kernel handles nonlinear, complex distribution shapes that a simple mean/variance comparison would miss
+
+is dif than reconstruciton loss (which is simple mse loss); captures more statisitical distribution discrepancies
+
+feature maps used here = feature maps from vgg?? (TODO: check)
+
+style loss (this is what ensures spectral consistency):
+When VGG processes an image, each channel in a feature map FlF^l
+Fl acts like a detector — one channel might activate for "diagonal edges", another for "warm color patches", another for "rough texture".
+******The Gram matrix computes the dot product between every pair of channels:
+Gl=Fl(Fl)T ∈ RCl×ClG^l = F^l (F^l)^T
+Each entry G_ij​ answers: "how much do feature i and j co-activate across the image?"
+
+Crucially, the Gram matrix discards spatial information — it doesn't care where in the image these features appear, 
+only whether they tend to appear together. This is exactly what you want for style, which is a global property, not a local one.
+
+can't just compare feature maps directly:
+Style should be **position-invariant** — the generated satellite image should *look like* the reference in terms of color and texture, regardless of exact spatial arrangement. The Gram matrix achieves this by collapsing the spatial dimensions (Hl×Wl)(H_l \times W_l)
+(Hl​×Wl​) away entirely.
+
+The VGG-Adapter uses style loss to correct color and texture distribution shifts between the generated patch and the surrounding reference image. 
+Without it, the diffusion model might fill a missing cloud region with structurally correct terrain but the wrong spectral color profile — 
+the Gram matrices enforce that the co-occurrence patterns of color channels and texture responses match the reference, which is exactly what "looks like the same satellite scene" means perceptually.
+
+important: VGG is trained on imagenet, so can only handle rgb images -- we can still include in loss, but it'll only capture terrain and rgb style, not spectral stuff
+
+so, can incorporate this: 
+1. Spectral Angle Mapper (SAM) is the standard remote-sensing metric for spectral fidelity. It measures the angle between the 13-d spectrum of each pixel in generated vs. reference — so if the generated image has the right brightness but wrong spectral shape (e.g., vegetation indices come out wrong because NIR/Red ratio is off), SAM catches it. MSE alone doesn't.
+2. Per-band moment matching ensures each band's distribution aligns with the reference globally. This directly addresses what the paper's VGG-Adapter is doing (correcting brightness shifts) — but per-band, so it works across all 13 channels, not just RGB.
+3. VGG perceptual losses stay meaningful (if we use the sentinel2's 3 rgb bands) because you're using the pretrained features as intended.
+
+^ we can just ablate and try various losses (with and without sam, with and without style/dsitr loss, etc) and see which performs best 
+
+on why we use conv4 layer of vgg for distribution loss, as outlined in paper (although this is not explicitly clear...):
+Lrecon​ (pixels) → exact appearance match
+Lstyle​ (conv1_1 … conv5_1) → *texture, color, brushstroke*
+Ldis​ (conv4_2) → *what objects/regions are present*
+
+Each loss enforces something the others can't. The network has to satisfy all three, and they pull in genuinely different directions.
+For SatelliteMaker specifically, this division has a concrete interpretation:
+
+Style loss on shallow layers → "The generated patch has the same texture — same grain, same color palette, same vegetation/sand/water look — as the reference"
+Distribution loss on conv4_2 → "The generated images contain the same kinds of regions — fields, roads, buildings, rivers — in the right proportions as the reference set"
+Reconstruction loss on pixels → "Per-pixel spectral values are correct"
+
+If you put distribution loss on conv1_1, you'd basically just be re-doing style loss with different statistics. If you put it on conv5_1, you'd lose so much spatial detail that you'd only be matching very abstract scene-level statistics ("this is a desert vs. this is a city") and miss everything more granular.
+conv4_2 is the sweet spot: deep enough to be about content rather than texture, shallow enough to still care about local composition.
+
+Style lives in the low-to-mid layers because texture is a local phenomenon. Content/semantics live in deep layers because meaning requires global context. Distribution loss attaches to whichever level you want aligned across the dataset.
+
+ICNN notes
+icnn = A standard neural network takes an input and produces an output through a forward pass. 
+An ICNN does something different: it's designed so that its output is a convex function of some (or all) of its inputs. 
+This means you can treat the network like an energy function and optimize over the inputs to find the best prediction.
+
+Key constraints to ensure convexity:
+All W^(z) weights (connecting hidden layers) must be non-negative
+Activation functions g_i must be convex and non-decreasing (ReLU satisfies this naturally)
+
+Role of ICNN in namm:
+The NAMM paper needs a forward mirror map g_ϕ that takes constrained data and transforms it into an unconstrained "mirror" space, 
+where a regular diffusion model can be trained. The key mathematical requirement for a true mirror map is that it must be the gradient 
+of a strongly convex function — this is what guarantees the map is invertible (by Legendre-Fenchel duality).
+
+ICNNs are used to parameterize g_ϕ. Specifically, g_ϕ is implemented as the gradient of a strongly input-convex neural network, 
+following the implementation of Tan et al. (2023). This is a direct application of the ICNN paper's architecture: 
+since an ICNN h(x) is convex in its input, its gradient ∇h(x) is a well-defined, monotone map — exactly the structure a mirror map requires.
+    - ie, For convex constraints, using the gradient of an ICNN satisfies the formal definition of a mirror map. 
+    The convexity of the ICNN ensures the gradient map is injective (one-to-one), which is necessary for the inverse map f_ψ 
+    to exist and be learnable.
+    - Practical (even for non-convex constraints): Even when the constraint set is non-convex using an ICNN-based forward map 
+    empirically outperforms using a plain ResNet (which is what inverse map uses). The paper's ablation study 
+    shows that a ResNet-based forward map produces a less regularized, "patchier" mirror space that the diffusion model 
+    struggles to learn, whereas the ICNN produces a smoother, better-structured mirror space with fewer outliers in constraint satisfaction. 
+    The authors conclude: "even when the constraint is non-convex and there are no theoretical reasons to use an ICNN, it may still be practically favorable."
+        - (inverse function does not necessarily have to be gradient of convex func; see mirror map section of paper)
+
+important for icnn code (from icnn paper, by amos et al):
+- Proposition 1. The function f is convex in y provided that all weights
+are non-negative, and all functions gi (nonlinearities/activation functions) are convex and non-decreasing (eg, relu or leaky relu).
+
+intuition: icnn is a convex invertible function that maps input image to some scalar (call this the potential). 
+we take the gradient of the convex to use as our forward map in namm, because 
+the gradient has dim (C, B, H, W), where each pixel represents how much the scalar potential changes for some perturbation
+
+strong convexiy hyperparam (alpha):
+namm paper chooses alpha = 0.9
+
+Alpha controls a direct tradeoff between expressiveness and invertibility safety:
+
+High alpha (e.g. 0.9): map is close to identity, easy to invert, but has limited ability to reshape the data distribution. Works well when the constraint is relatively mild (e.g. total brightness, periodicity).
+Low alpha (e.g. 0.1): map can reshape the distribution substantially, potentially handling complex constraints better, but the ICNN network must do more work and training becomes harder. The inverse map f_psi also faces a harder problem.
+
+The NAMM paper's choice of alpha = 0.9 reflects the philosophy that the mirror map should be a gentle, reliable transformation — just enough to move constrained data into an unconstrained region — 
+rather than a radical reparameterization of the data space.
+
+Compared to ordinary convexity (which just requires the right-hand side without the last term), strong convexity says the function grows at least as fast as a quadratic away from any point. It is strictly more curved than a flat line.
+
+by def, mirror map must be strongly convex, which allows inverse of forward map to actulally exist
+
+old implementation of icnn.py didn't follow icnn layer implementation of Tan et al, which is what namm paper says it uses 
+(includes a w * x^2 term, which old implementation didn't have; it just had simple linear term w*x). the namm impl has this term too, which 
+makes the icnn (convex function) more curvy and "more convex" ... i think
+
+the old impl is still a (mostly) correct icnn implemtnation that faithfully follows amos et al eqns, but not tan et al impl -- namm uses the tan et al impl, 
+as shown in namm/icnn.py
+
