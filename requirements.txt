@@ -1,0 +1,11 @@
+# Root pip requirements for venv support.
+# This file references the EMRDM Phase 2 requirements list.
+# Adjust CUDA-specific torch/torchvision/torchaudio specifiers in
+# phase2_emrdm/requirements.txt if you are on macOS or a CPU-only system.
+
+-r phase2_emrdm/requirements.txt
+
+# python -m venv .venv
+# source .venv/bin/activate
+# python -m pip install --upgrade pip
+# python -m pip install -r requirements.txt
