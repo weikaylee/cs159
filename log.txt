@@ -27,3 +27,113 @@ TODO
 - move onto phase 2?
 - if train_mirror_map is good, can we just go ahead and train it on our data..? (cus dont need emrdm rn?)
 - verify that loss is correct!!!! this is the most important part
+
+5/19 verifying phase 1 claude code
+- losses: added sam and per-band mean-std loss terms, since vgg can only be applied to rgb bands (vgg is trained on imagenet) which means we're not actually incorporating spectral consistency
+    - see notes.txt for more motiviation
+- changed VGGFeatureExtractor class to apply vgg on rgb bands, instead of using learned projection from 13-band img to 3-band img
+- updated VGGFeatureExtractor to use vgg19, as specified in paper. also ensure that this is followed:
+
+VGG-19 consists of 19 layers, including 16 convolutional layers and 3 fully connected layers. In style transfer, we use conv11, conv21, conv31, conv41, and conv51
+for style representation, and conv42 for content representation. The weights are set as 1.0, 0.8, 0.5, 0.3, 0.1. 
+
+- ^see notes.txt for motiviation
+- changed l_distr to use gaussian kernel as phi, as suggested by paper. see docstrings in losses.py for explanations (trusting claude on this one lol)
+- changed l_style to use correct normalization as defined in paper (before, was doing an extra square in gram matrix func)
+- changed namm_loss function to follow paper's equations; before, implemented smth hallucinated lowk
+
+5/19 verifying icnn 
+- see notes.txt for notes on what icnn is, why use icnn gradient as forward map, how exactly to enforce convexity, what implementation of icnn namm uses
+- original implemnentation of icnn.py is a mostly correct icnn implementation that
+follows equations of amos et al (og icnn paper). but, doesn't follow implementation of tan et al which is what namm uses
+(ie doesn't include a "w_quad" term (to form W * x ^ 2), which is important in making forward map more curvy / "more convex")
+- so, new impl adds this term and more closely follows tan et al impl. see docstrings for sum notes too
+- updated inverse_map.py st it applies relu after residual (instead of other way around) to match namm impl
+- removed ema stuff from train_mirror_map.py. namm/train_namm.py doesn't use it, and idk why we'd have to use it xd
+- added download_all_data.sh -- taken from sen12cm authors; downlaods all data interacively
+
+5/23 fixing loss ablations and adding slurm scripts
+problem: loss vals from vgg terms are HUGE (1e9)
+
+claude:
+Root cause is l_style in phase1_mirror_map/losses.py. The Gatys
+ normalization ||Gg − Gr||²_F / (4·C²·H²·W²) leaves per-layer style loss
+ scaling as O(activation⁴): each Gram entry is Σ_{HW} F_i F_j = O(M·a²),
+ squared and summed over C² entries gives O(C²·M²·a⁴), and the denom
+ 4·C²·M² cancels everything except O(a⁴). With ImageNet-normalized
+ Sentinel-2 RGB and VGG-19 ReLU activations of O(10–100), l_style ≈ 1e7;
+ times style_weight=100 → ~1e9, swamping cycle (~24), recon (~0.5), and the
+ spectral terms (~0.5).
+
+ Other terms are already in compatible ranges: l_dis (Gaussian-kernel MMD) is
+ bounded in roughly [-2, 2]; l_recon, l_sam, l_moments are all O(1) on
+ [0, 1] reflectance.
+
+ Effect on the ablation: in vgg / full runs the gradient is dominated by
+ VGG style, so any signal from L_sam / L_moments / L_recon is invisible
+ and cross-family val-loss ranking is not meaningful.
+
+fix: Replace the Gatys denominator with a per-layer relative-error formulation:
+
+ L_style = Σ_l  w_l · ||G_gen^l − G_ref^l||²_F  /  (||G_ref^l||²_F + eps)
+
+ Both numerator and denominator are O(a⁴), so the ratio is invariant to VGG
+ activation magnitudes, feature-map size, and input distribution. At
+ initialization it sits near O(1) when Gen and Ref Grams are dissimilar; goes
+ to 0 as they match (preserving the existing "zero on identical inputs"
+ property the unit tests check). Same semantic intent as Gatys — match
+ channel co-activation patterns — just unit-free.
+
+ gram_matrix stays as the raw F F^T; normalization is l_style's job.
+
+5/25 wandb ablation logging + NaN fix + sweep stage scripts
+
+wandb logging for run_loss_ablation.py:
+- collate() now returns sorted rows so the caller can use them
+- added log_ablation_to_wandb() — creates a dedicated wandb summary run after
+  collation that logs: wandb.Table of all configs ranked by val_loss, best-config
+  scalars (best_val_loss/mae/sam/psnr/ssim), and ablation_summary.csv as an artifact
+- both the full sweep path and --collate_only now call log_ablation_to_wandb when
+  --wandb is set
+- run_loss_ablation_no_sweep.sh: added --wandb_prefix "ablation-vgg-" and
+  "ablation-spectral-" so the two summary runs don't collide as "ablation-summary"
+
+stage sweep scripts (phase1_mirror_map/):
+- stage2_coarse_sweep.sh: slurm array 0-17, 15 epochs, one GPU per config. includes
+  collation dependency command in comments (sbatch --dependency=afterany:...)
+- stage3_top_configs.sh: 3 GPUs in parallel, 100 epochs; edit CONFIG1/2/3 with top
+  config names from stage 2 ablation_summary.csv sorted by val_sam (not val_loss)
+- stage4_fine_sweep.sh: slurm array, 100 epochs, fine grid around stage 3 winner.
+  set FAMILY=vgg or spectral and submit with --array=0-8 (vgg) or --array=9-17
+  (spectral); vgg grid: style in {50,100,200} x dis in {0.5,1,2}; spectral grid:
+  sam and moment both in {0.5,1,2}
+
+constr=nan fix (losses.py):
+problem: training logs showed constr=nan and loss=nan from step 0 for all 600+ steps,
+meaning weights were NEVER updated (GradScaler skips optimizer.step when grads are nan)
+
+root causes:
+1. fp16 overflow in VGG gram matrices: f_psi at init outputs ReLU(decoder + y_noisy)
+   where y_noisy = g_phi(x) + sigma*z. g_phi at init can produce large values, so
+   y_noisy is not bounded to [0,1]. a pixel value of 40 becomes ~172 after ImageNet
+   normalization (std~0.2). Gram entry = sum_hw(f_c1 * f_c2) ~ 172^2 * H * W which
+   blows past fp16 max (65504) -> NaN immediately
+2. l_style magnitude explosion: even in float32, Gatys l_style ~ 1e7/layer, at
+   style_weight=100 contributes ~1e9 to loss vs cycle~24 and spectral~0.5 (7-8 orders
+   of magnitude imbalance). prevents any gradient signal from non-VGG terms
+3. VGG receiving out-of-range inputs: reflectances should be [0,1] but f_psi output
+   is unbounded above 1.0 at init
+
+fixes in losses.py:
+- VGGFeatureExtractor.forward: x = x.float() at start (upcast from fp16 before gram)
+- VGGFeatureExtractor.forward: .clamp(0.0, 1.0) on RGB bands before ImageNet norm
+- l_style: replaced Gatys formula with cosine-distance (unit-Frobenius-normalise both
+  Grams before differencing). result is bounded in [0, 4] regardless of activation
+  scale. Gram-magnitude info already captured by l_recon and l_moments
+
+run_loss_ablation_no_sweep.sh timing fix:
+- observed 6.1 s/step at 256x256 with NaN training (no weight updates, 0 learning)
+- with real backprop at 256x256: ~12-15 s/step -> 2 epochs would need ~46h (was set to 24h)
+- fix: add --patch_size 64 (official NAMM resolution per CLAUDE.md; ~8-10x faster spatially)
+- update --epochs 2 -> 25 (2 epochs provided no convergence signal since weights never updated)
+- --time=24:00:00 stays correct for 25 epochs at patch_size=64 (~1-2 s/step estimated)

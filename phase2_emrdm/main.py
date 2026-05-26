@@ -884,7 +884,8 @@ if __name__ == "__main__":
                 config.model.base_learning_rate,
             )
         if not cpu:
-            ngpu = len(lightning_config.trainer.devices.strip(",").split(","))
+            _devices = lightning_config.trainer.devices
+            ngpu = _devices if isinstance(_devices, int) else len(str(_devices).strip(",").split(","))
         else:
             ngpu = 1
         if "accumulate_grad_batches" in lightning_config.trainer:
