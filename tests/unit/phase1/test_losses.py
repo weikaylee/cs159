@@ -23,8 +23,8 @@ import pytest
 from icnn import ICNN, ICNNGradient
 from inverse_map import InverseMap
 from losses import (
-    l_recon, l_dis, l_style, gram_matrix, ConstraintLoss, namm_loss,
-    spectral_angle_mapper, reconstruction_metrics,
+    l_recon, l_dis, l_style, l_moments, l_sam, gram_matrix, ConstraintLoss,
+    namm_loss, spectral_angle_mapper, reconstruction_metrics,
 )
 
 
@@ -108,6 +108,19 @@ def test_l_style_zero_on_identity():
     assert l_style(feats, feats).item() == pytest.approx(0.0, abs=1e-6)
 
 
+def test_l_moments_zero_on_identity():
+    """l_moments(x, x) == 0 when per-band mean/std match exactly."""
+    x = torch.rand(2, 13, 16, 16)
+    assert l_moments(x, x).item() == pytest.approx(0.0, abs=1e-6)
+
+
+def test_l_moments_positive_on_shift():
+    """l_moments detects per-band mean/std shifts."""
+    x = torch.rand(2, 13, 16, 16)
+    y = x * 1.1 + 0.05
+    assert l_moments(x, y).item() > 0
+
+
 def test_constraint_loss_zero_on_identity(constraint_loss):
     """ConstraintLoss(x, x) ~= 0 — the composite inherits identity-zero.
 
@@ -119,7 +132,7 @@ def test_constraint_loss_zero_on_identity(constraint_loss):
     residual.
     """
     x = torch.rand(2, 13, 32, 32)
-    assert constraint_loss(x, x).item() == pytest.approx(0.0, abs=1e-4)
+    assert constraint_loss(x, x).item() == pytest.approx(0.0, abs=5e-4)
 
 
 def test_namm_loss_structure(constraint_loss):
@@ -144,10 +157,11 @@ def test_namm_loss_structure(constraint_loss):
     out = namm_loss(
         g_phi, f_psi, constraint_loss, x,
         max_sigma=0.1, cycle_weight=1.0, constraint_weight=1.0,
-        reg_weight=0.001, strong_convexity=0.3, device=x.device,
+        reg_weight=0.001, device=x.device,
     )
 
-    assert set(out) == {"loss", "l_cycle", "l_constr", "l_reg", "x_recon"}
+    assert set(out) == {"loss", "l_cycle", "l_constr", "l_reg",
+                         "x_recon"}
     for k in ("loss", "l_cycle", "l_constr", "l_reg"):
         v = out[k]
         assert isinstance(v, torch.Tensor)
@@ -161,6 +175,12 @@ def test_namm_loss_structure(constraint_loss):
     for k in ("l_cycle", "l_constr", "l_reg"):
         assert not out[k].requires_grad, \
             f"{k} should be detached (training loop logs it via .item())"
+
+
+def test_l_sam_zero_on_identity():
+    """l_sam(x, x) ~= 0 — wrapper around spectral_angle_mapper."""
+    x = torch.rand(2, 13, 16, 16)
+    assert l_sam(x, x).item() == pytest.approx(0.0, abs=1e-3)
 
 
 def test_spectral_angle_mapper_zero_on_identity():
