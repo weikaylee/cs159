@@ -30,7 +30,10 @@ mkdir -p "$OUTPUT_ROOT"
 cd "$CODE_DIR"
 python model/test_reconstruct.py \
   --experiment_name diffcr_bs32_epoch17 \
+  --root1 "$DATA_ROOT" \
+  --root2 "$DATA_ROOT" \
   --root3 "$DATA_ROOT" \
+  --precomputed "$CODE_DIR/util/precomputed" \
   --input_t 1 \
   --region all \
   --export_every 1 \
