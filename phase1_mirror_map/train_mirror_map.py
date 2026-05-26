@@ -75,6 +75,10 @@ def get_args():
     # Misc
     p.add_argument('--patch_size',   type=int, default=None,
                    help='Random-crop spatial size (default: full 256x256)')
+    p.add_argument('--emrdm_root',   type=str, default=None,
+                   help='Root directory of EMRDM outputs for paired training')
+    p.add_argument('--emrdm_loss_weight', type=float, default=1.0,
+                   help='Weight for the EMRDM-output constraint loss')
     p.add_argument('--num_workers',  type=int, default=4)
     p.add_argument('--log_every',    type=int, default=50,
                    help='Log every N batches')
@@ -160,8 +164,14 @@ def validate(g_phi, f_psi, constraint_loss, val_loader, device, args):
             'mae', 'sam', 'psnr', 'ssim')
     totals = {k: 0.0 for k in keys}
     n = 0
-    for x in val_loader:
+    for batch in val_loader:
+        if isinstance(batch, (tuple, list)):
+            x, x_emrdm = batch
+            x_emrdm = x_emrdm.to(device, non_blocking=True)
+        else:
+            x, x_emrdm = batch, None
         x = x.to(device)
+
         losses = namm_loss(
             g_phi, f_psi, constraint_loss, x,
             max_sigma=args.max_sigma,
@@ -171,6 +181,13 @@ def validate(g_phi, f_psi, constraint_loss, val_loader, device, args):
             strong_convexity=args.strong_convexity,
             device=device,
         )
+
+        if x_emrdm is not None and args.emrdm_loss_weight != 0.0:
+            y_emrdm = g_phi(x_emrdm)
+            x_recon_emrdm = f_psi(y_emrdm)
+            l_emrdm = constraint_loss(x_recon_emrdm, x)
+            losses['loss'] = losses['loss'] + args.emrdm_loss_weight * l_emrdm
+
         metrics = reconstruction_metrics(losses['x_recon'], x)
         bsz = x.size(0)
         for k in ('loss', 'l_cycle', 'l_constr', 'l_reg'):
@@ -207,6 +224,7 @@ def main():
     train_loader, val_loader = build_dataloaders(
         data_root=args.data_root,
         roi=args.roi,
+        emrdm_root=args.emrdm_root,
         batch_size=args.batch_size,
         num_workers=args.num_workers,
         patch_size=args.patch_size,
@@ -262,7 +280,12 @@ def main():
         train_totals = {k: 0.0 for k in train_keys}
         train_n = 0
 
-        for step, x in enumerate(train_loader):
+        for step, batch in enumerate(train_loader):
+            if isinstance(batch, (tuple, list)):
+                x, x_emrdm = batch
+                x_emrdm = x_emrdm.to(device, non_blocking=True)
+            else:
+                x, x_emrdm = batch, None
             x = x.to(device, non_blocking=True)
 
             opt_g.zero_grad(set_to_none=True)
@@ -278,6 +301,12 @@ def main():
                     strong_convexity=args.strong_convexity,
                     device=device,
                 )
+                if x_emrdm is not None and args.emrdm_loss_weight != 0.0:
+                    y_emrdm = g_phi(x_emrdm)
+                    x_recon_emrdm = f_psi(y_emrdm)
+                    l_emrdm = constraint_loss(x_recon_emrdm, x)
+                    losses['loss'] = losses['loss'] + args.emrdm_loss_weight * l_emrdm
+                    losses['l_emrdm'] = l_emrdm.detach()
 
             scaler.scale(losses['loss']).backward()
             scaler.unscale_(opt_g)
@@ -315,6 +344,8 @@ def main():
                        f'psnr={batch_metrics["psnr"].item():.2f} | '
                        f'ssim={batch_metrics["ssim"].item():.3f} | '
                        f't={elapsed:.1f}s')
+                if x_emrdm is not None:
+                    msg = msg.replace(' | t=', f' | emrdm={losses["l_emrdm"].item():.4f} | t=')
                 print(msg)
 
         # ── Train epoch metrics ─────────────────────────────────────────────
