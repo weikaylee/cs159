@@ -1,20 +1,19 @@
 #!/bin/bash
-# Stage 3 — Top configs from Stage 2 at full epochs (100).
+# Stage 3 — Top 3 configs from Stage 2, warm-started from stage2 best.pt.
 #
-# After Stage 2 collation, pick the top 3 configs by val_sam from
-# ablation_summary.csv (not just val_loss — spectral consistency matters).
-# Edit TOP_CONFIGS below with the config names from that file.
+# Configs (ranked by val_sam from ablation_summary.csv):
+#   spectral_sw0.1_mw1   val_sam=0.0617  val_psnr=37.30  val_ssim=0.944  (best overall)
+#   spectral_sw1_mw10    val_sam=0.0598  val_psnr=33.53  val_ssim=0.944
+#   spectral_sw10_mw10   val_sam=0.0580  val_psnr=30.56  val_ssim=0.910  (best SAM)
 #
-# Config name format examples:
-#   vgg_st100_ds1        (style_weight=100, dis_weight=1)
-#   vgg_st1000_ds10      (style_weight=1000, dis_weight=10)
-#   spectral_sw1_mw1     (sam_weight=1, moment_weight=1)
-#   spectral_sw0.1_mw10  (sam_weight=0.1, moment_weight=10)
+# Calls train_mirror_map.py directly (not run_loss_ablation.py) so --resume
+# can be passed. run_loss_ablation.py --collate_only at the end builds the
+# stage3 ablation_summary.csv.
 #
 # The three configs run in parallel, one per GPU.  If only 2 GPUs are
 # available, remove GPU2 / CONFIG3 and request --gres=gpu:2 / --ntasks=2.
 #
-# TODO EDIT BEFORE SUBMITTING: TOP_CONFIGS, --epochs, --mail-user, paths.
+# TODO EDIT BEFORE SUBMITTING: --epochs, --mail-user, paths.
 
 #SBATCH --nodes=1
 #SBATCH --ntasks=3
@@ -38,56 +37,52 @@ conda activate emrdm
 # ── Paths ────────────────────────────────────────────────────────────────────
 DATA_ROOT="/resnick/groups/perona/oywang/cs159/data"
 CODE_DIR="/resnick/groups/perona/oywang/cs159/phase1_mirror_map"
+STAGE2_ROOT="/resnick/groups/perona/oywang/cs159/runs/stage2_coarse"
 OUTPUT_ROOT="/resnick/groups/perona/oywang/cs159/runs/stage3_top"
 
 mkdir -p "$OUTPUT_ROOT"
 
-# ── EDIT: top 3 config names from Stage 2 ablation_summary.csv ──────────────
-CONFIG1="EDIT_ME"   # e.g. vgg_st100_ds1
-CONFIG2="EDIT_ME"   # e.g. spectral_sw1_mw1
-CONFIG3="EDIT_ME"   # e.g. vgg_st1000_ds10
+# ── Top 3 configs from Stage 2 (by val_sam) ──────────────────────────────────
+CONFIG1="spectral_sw0.1_mw1"
+CONFIG2="spectral_sw1_mw10"
+CONFIG3="spectral_sw10_mw10"
+
+# ── Shared training args ──────────────────────────────────────────────────────
+COMMON=(
+    --data_root   "$DATA_ROOT"
+    --roi         all
+    --epochs      100
+    --batch_size  16
+    --lr          2e-4
+    --num_workers 8
+    --max_sigma   0.1
+    --fp16
+    --wandb --wandb_project cs159
+)
 
 # ── Run three configs in parallel, one GPU each ──────────────────────────────
-CUDA_VISIBLE_DEVICES=0 python "$CODE_DIR/run_loss_ablation.py" \
-    --data_root    "$DATA_ROOT" \
-    --output_root  "$OUTPUT_ROOT" \
-    --roi          all \
-    --epochs       100 \
-    --batch_size   16 \
-    --lr           2e-4 \
-    --num_workers  8 \
-    --max_sigma    0.1 \
-    --fp16 \
-    --wandb --wandb_project cs159 --wandb_prefix "stage3-" \
-    --only         "$CONFIG1" &
+CUDA_VISIBLE_DEVICES=0 python "$CODE_DIR/train_mirror_map.py" \
+    "${COMMON[@]}" \
+    --output_dir     "$OUTPUT_ROOT/$CONFIG1" \
+    --resume         "$STAGE2_ROOT/$CONFIG1/best.pt" \
+    --sam_weight     0.1 --moment_weight 1 \
+    --wandb_run_name "stage3-$CONFIG1" &
 PID1=$!
 
-CUDA_VISIBLE_DEVICES=1 python "$CODE_DIR/run_loss_ablation.py" \
-    --data_root    "$DATA_ROOT" \
-    --output_root  "$OUTPUT_ROOT" \
-    --roi          all \
-    --epochs       100 \
-    --batch_size   16 \
-    --lr           2e-4 \
-    --num_workers  8 \
-    --max_sigma    0.1 \
-    --fp16 \
-    --wandb --wandb_project cs159 --wandb_prefix "stage3-" \
-    --only         "$CONFIG2" &
+CUDA_VISIBLE_DEVICES=1 python "$CODE_DIR/train_mirror_map.py" \
+    "${COMMON[@]}" \
+    --output_dir     "$OUTPUT_ROOT/$CONFIG2" \
+    --resume         "$STAGE2_ROOT/$CONFIG2/best.pt" \
+    --sam_weight     1 --moment_weight 10 \
+    --wandb_run_name "stage3-$CONFIG2" &
 PID2=$!
 
-CUDA_VISIBLE_DEVICES=2 python "$CODE_DIR/run_loss_ablation.py" \
-    --data_root    "$DATA_ROOT" \
-    --output_root  "$OUTPUT_ROOT" \
-    --roi          all \
-    --epochs       100 \
-    --batch_size   16 \
-    --lr           2e-4 \
-    --num_workers  8 \
-    --max_sigma    0.1 \
-    --fp16 \
-    --wandb --wandb_project cs159 --wandb_prefix "stage3-" \
-    --only         "$CONFIG3" &
+CUDA_VISIBLE_DEVICES=2 python "$CODE_DIR/train_mirror_map.py" \
+    "${COMMON[@]}" \
+    --output_dir     "$OUTPUT_ROOT/$CONFIG3" \
+    --resume         "$STAGE2_ROOT/$CONFIG3/best.pt" \
+    --sam_weight     10 --moment_weight 10 \
+    --wandb_run_name "stage3-$CONFIG3" &
 PID3=$!
 
 # ── Wait and propagate failures ──────────────────────────────────────────────
@@ -101,6 +96,7 @@ for pair in "$EXIT1:$CONFIG1" "$EXIT2:$CONFIG2" "$EXIT3:$CONFIG3"; do
 done
 
 # ── Combined collation + wandb summary ───────────────────────────────────────
+# Collates the 3 configs; other ablation configs show as "missing" (expected).
 python "$CODE_DIR/run_loss_ablation.py" \
     --output_root  "$OUTPUT_ROOT" \
     --collate_only \
