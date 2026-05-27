@@ -5,8 +5,8 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32G
 #SBATCH --time=08:00:00
-#SBATCH --output=cs159/bash_logs/emrdm_infer.%j.out
-#SBATCH --error=cs159/bash_logs/emrdm_infer.%j.err
+#SBATCH --output=/resnick/groups/perona/oywang/cs159/logs/emrdm_infer.%j.out
+#SBATCH --error=/resnick/groups/perona/oywang/cs159/logs/emrdm_infer.%j.err
 
 set -euo pipefail
 
