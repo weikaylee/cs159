@@ -94,6 +94,29 @@ python main.py --base configs/example_training/[yaml_file_name].yaml --enable_tf
 ```
 Here, [`cuhk.yaml`](./configs/example_training/cuhk.yaml) is for training on the CUHK-CR1 dataset, [`cuhkv2.yaml`](./configs/example_training/cuhkv2.yaml) is for training on the CUHK-CR2 dataset, [`sen2_mtc_new.yaml`](./configs/example_training/sen2_mtc_new.yaml) is for training on the Sen2\_MTC\_New dataset, and [`sentinel.yaml`](./configs/example_training/sentinel.yaml) is for training on the SEN12MS-CR dataset. Note that you should modify the `data.params.train` part in the `yaml` file according to your dataset path.
 
+#### Mirror-space EMRDM training
+To train EMRDM in the NAMM mirror space, first generate mirror-space targets from a pretrained NAMM `g_phi`:
+
+```bash
+cd phase2_emrdm
+python prepare_mirror_dataset.py \
+  --data_root /path/to/data \
+  --namm_ckpt /path/to/phase1_mirror_map/last.pt \
+  --device cuda
+```
+
+This writes mirror-space targets under `mirror_s2/` and split files named `all_train_paths_mirror.pkl`, `all_val_paths_mirror.pkl`, and `all_test_paths_mirror.pkl`.
+
+Then use the new config file:
+
+```bash
+python main.py --base configs/example_training/sentinel_mirror.yaml --enable_tf32 \
+  data.params.train.params.root=/path/to/data \
+  data.params.validation.params.root=/path/to/data \
+  data.params.test.params.root=/path/to/data \
+  data.params.predict.params.root=/path/to/data
+```
+
 You can also use the `-l` parameter to change the save path of logs, with `./logs` as the default path:
 
 ```bash

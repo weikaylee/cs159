@@ -50,6 +50,8 @@ class SEN12MSCRInterface(Dataset):
         region:       Ignored (kept for yaml compatibility); use "all".
         rescale:      If True, normalise S2 to [0, 1] and S1 to [0, 1].
         cloud_masks:  Ignored (kept for yaml compatibility).
+        paths_file:   Optional pickle file name to load instead of
+                      `all_{split}_paths.pkl`.
     """
 
     def __init__(
@@ -59,11 +61,17 @@ class SEN12MSCRInterface(Dataset):
         region: str = "all",
         rescale: bool = True,
         cloud_masks=None,
+        paths_file: str | None = None,
     ):
-        self.root    = root
-        self.rescale = rescale
+        self.root      = root
+        self.rescale   = rescale
+        self.paths_file = paths_file
 
-        pkl_path = os.path.join(root, f"all_{split}_paths.pkl")
+        if paths_file is None:
+            pkl_path = os.path.join(root, f"all_{split}_paths.pkl")
+        else:
+            pkl_path = paths_file if os.path.isabs(paths_file) else os.path.join(root, paths_file)
+
         if not os.path.exists(pkl_path):
             raise FileNotFoundError(
                 f"pkl file not found: {pkl_path}\n"
