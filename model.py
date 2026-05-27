@@ -21,7 +21,7 @@ CS159_DIR = SCRIPT_DIR
 DATA_ROOT = os.environ.get("EMRDM_DATA_ROOT", os.path.join(CS159_DIR, "data"))
 CKPT = os.environ.get("EMRDM_CKPT", os.path.join(CS159_DIR, "last.ckpt"))
 EMRDM = os.environ.get("EMRDM_REPO", os.path.join(CS159_DIR, "EMRDM"))
-RESULTS_DIR = os.environ.get("EMRDM_RESULTS_DIR", os.path.join(REPO_ROOT, "results"))
+RESULTS_DIR = os.environ.get("EMRDM_RESULTS_DIR", os.path.join(CS159_DIR, "results"))
 DEVICES = os.environ.get("EMRDM_DEVICES", "1")
 INSTALL_DEPS = os.environ.get("EMRDM_INSTALL_DEPS", "0") == "1"
 DOWNLOAD_DATA = os.environ.get("EMRDM_DOWNLOAD_DATA", "0") == "1"
@@ -153,3 +153,41 @@ if log_dirs:
     print(f"Results saved to {RESULTS_DIR}")
     for f in glob.glob(f"{latest}/*.png"):
         print(f"  {os.path.basename(f)}")
+
+# # ============ STEP 11: Post-process PNGs for visualization ============
+# print("=== Post-processing PNGs ===")
+# try:
+#     from PIL import Image
+#     import numpy as _np
+
+#     sample_dir = os.path.join(RESULTS_DIR, "sample")
+#     png_files = glob.glob(f"{sample_dir}/*.png")
+
+#     for png_path in sorted(png_files):
+#         fname = os.path.basename(png_path)
+#         img = _np.array(Image.open(png_path)).astype(_np.float32)
+
+#         if img.ndim == 2:
+#             img = img[:, :, _np.newaxis]
+
+#         # Per-channel 2–98th percentile stretch so the full dynamic range is used.
+#         # This fixes both the "too dark" and "mostly white" issues without altering
+#         # the relative spatial content.
+#         out = _np.empty_like(img)
+#         for c in range(img.shape[2]):
+#             p2, p98 = _np.percentile(img[:, :, c], [2, 98])
+#             if p98 > p2:
+#                 out[:, :, c] = (img[:, :, c] - p2) / (p98 - p2) * 255.0
+#             else:
+#                 out[:, :, c] = img[:, :, c]
+#         out = _np.clip(out, 0, 255).astype(_np.uint8)
+
+#         if out.shape[2] == 1:
+#             Image.fromarray(out[:, :, 0]).save(png_path)
+#         else:
+#             Image.fromarray(out).save(png_path)
+#         print(f"  post-processed {fname}")
+
+#     print("Post-processing done.")
+# except Exception as e:
+#     print(f"Warning: post-processing failed ({e}); raw PNGs kept.")

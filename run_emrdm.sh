@@ -17,7 +17,7 @@ cd "${CS159_DIR}"
 
 # Activate conda env (kwei credentials)
 source "/home/kwei2/miniforge3/etc/profile.d/conda.sh"
-conda activate emrdm
+conda activate emrdm_test
 
 # Optional overrides
 # export EMRDM_REPO="${ROOT_DIR}/EMRDM"
