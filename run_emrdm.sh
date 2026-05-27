@@ -10,13 +10,13 @@
 
 set -euo pipefail
 
-ROOT_DIR="/resnick/groups/CS156b/from_central/2026/SSSClassCSNerds"
+ROOT_DIR="/resnick/groups/perona/oywang/"
 CS159_DIR="${ROOT_DIR}/cs159"
 
 cd "${CS159_DIR}"
 
 # Activate conda env (kwei credentials)
-source "/home/kwei2/miniforge3/etc/profile.d/conda.sh"
+source "$(conda info --base)/etc/profile.d/conda.sh"
 conda activate emrdm_test
 
 # Optional overrides
