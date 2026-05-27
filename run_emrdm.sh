@@ -32,8 +32,4 @@ conda activate emrdm_test
 # export EMRDM_DOWNLOAD_WEIGHTS="0"
 # export EMRDM_PATCH_NATTEN="1"
 
-if [[ -n "${SLURM_JOB_GPUS:-}" ]]; then
-	export CUDA_VISIBLE_DEVICES="${SLURM_JOB_GPUS}"
-fi
-
 srun --ntasks=1 --gpus=1 python model.py
