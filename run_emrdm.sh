@@ -7,6 +7,8 @@
 #SBATCH --time=08:00:00
 #SBATCH --output=/resnick/groups/perona/oywang/cs159/logs/emrdm_infer.%j.out
 #SBATCH --error=/resnick/groups/perona/oywang/cs159/logs/emrdm_infer.%j.err
+#SBATCH --mail-type=BEGIN,END,FAIL
+#SBATCH --mail-user=oywang@caltech.edu
 
 set -euo pipefail
 
