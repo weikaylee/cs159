@@ -17,9 +17,10 @@ import glob
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, ".."))
 CS159_DIR = SCRIPT_DIR
+CKPT_DIR = os.path.join(CS159_DIR, "emrdm_weights/train/sentinel/checkpoints")
 
 DATA_ROOT = os.environ.get("EMRDM_DATA_ROOT", os.path.join(CS159_DIR, "data"))
-CKPT = os.environ.get("EMRDM_CKPT", os.path.join(CS159_DIR, "last.ckpt"))
+CKPT = os.environ.get("EMRDM_CKPT", os.path.join(CKPT_DIR, "last.ckpt"))
 EMRDM = os.environ.get("EMRDM_REPO", os.path.join(CS159_DIR, "EMRDM"))
 RESULTS_DIR = os.environ.get("EMRDM_RESULTS_DIR", os.path.join(CS159_DIR, "results"))
 DEVICES = os.environ.get("EMRDM_DEVICES", "1")
