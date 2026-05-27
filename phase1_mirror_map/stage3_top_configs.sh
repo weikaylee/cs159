@@ -54,7 +54,7 @@ COMMON=(
     --epochs      100
     --batch_size  16
     --lr          2e-4
-    --num_workers 8
+    --num_workers 4
     --max_sigma   0.1
     --fp16
     --wandb --wandb_project cs159
