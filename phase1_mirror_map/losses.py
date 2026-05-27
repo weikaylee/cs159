@@ -262,6 +262,10 @@ def l_moments(x_hat: torch.Tensor,
               x_ref: torch.Tensor,
               eps: float = 1e-6) -> torch.Tensor:
     """Per-band mean + std matching across batch and spatial dims."""
+    # Cast to float32: fp16 variance accumulation over B*H*W ~1M elements
+    # can overflow, and eps=1e-6 is subnormal in fp16 (min normal ~6.1e-5).
+    x_hat = x_hat.float()
+    x_ref = x_ref.float()
     mean_hat = x_hat.mean(dim=(0, 2, 3))
     mean_ref = x_ref.mean(dim=(0, 2, 3))
     std_hat = x_hat.std(dim=(0, 2, 3), unbiased=False).clamp(min=eps)
@@ -364,6 +368,10 @@ def spectral_angle_mapper(x_hat: torch.Tensor,
         Scalar tensor: mean of arccos of per-pixel cosine similarity
         along the channel axis. Lower = more spectrally consistent.
     """
+    # Cast to float32: fp16 min subnormal (~5.96e-8) is larger than eps=1e-8,
+    # so clamp(min=eps) is a no-op in fp16 and zero-norm pixels produce 0/0.
+    x_hat = x_hat.float()
+    x_ref = x_ref.float()
     dot = (x_hat * x_ref).sum(dim=1)
     nx = x_hat.norm(dim=1).clamp(min=eps)
     ny = x_ref.norm(dim=1).clamp(min=eps)
