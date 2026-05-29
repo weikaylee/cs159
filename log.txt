@@ -53,6 +53,7 @@ follows equations of amos et al (og icnn paper). but, doesn't follow implementat
 - added download_all_data.sh -- taken from sen12cm authors; downlaods all data interacively
 
 5/23 fixing loss ablations and adding slurm scripts
+=== start of notes === 
 problem: loss vals from vgg terms are HUGE (1e9)
 
 claude:
@@ -85,3 +86,20 @@ fix: Replace the Gatys denominator with a per-layer relative-error formulation:
  channel co-activation patterns — just unit-free.
 
  gram_matrix stays as the raw F F^T; normalization is l_style's job.
+ === end of notes === 
+
+- split up loss ablations into two groups: one uses vgg terms only (distr and style loses, so total loss = l_recon + weight * l_distr + weight * l_style)
+and the other uses spectral terms only (sam and spectral_distr, so total loss = l_recon + weight * l_sam + weight * l_spectral_distr)
+    - vgg losses are huge, drowns out spectral losses, so split them up
+- added 2 slurm scripts for running namm with these losses" run_loss_ablation.slurm and run_loss_ablation_no_sweep.slurm
+    - run_loss_ablation.slurm does small hyperparam sweep for weights for both vgg loss and spectral loss (total 18 configs/runs, 
+    see run_loss_ablations.py top of file docstring for deets). script submits these 18 jobs all at once for u 
+    - run_loss_ablation_no_sweep.slurm just runs 2 jobs, one for vgg and one for spectral, with "default" weights 
+    (vgg follows the loss paper, spectral just uses weights of 1)
+
+# 5/29 verify that training in mirror space works
+craneshadow:
+i think the readme in phase 2 should be updated but basically prepare_mirror_dataset.py should generate mirror space emrdm targets using g
+
+and then u can train emrdm in mirror space using python main.py --base configs/example_training/sentinel_mirror.yaml (??)
+
