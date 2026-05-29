@@ -8,9 +8,11 @@ __pycache__/
 
 # Training artifacts
 *.pt
+*.ckpt
 wandb/
 checkpoints/
 runs/
+*.tif
 
 # Editor / OS
 .DS_Store
@@ -20,3 +22,4 @@ runs/
 .claude/
 .github/
 papers/
+EMRDM/
