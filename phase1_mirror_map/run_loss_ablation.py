@@ -98,6 +98,16 @@ def get_args():
     p.add_argument('--log_every', type=int, default=200)
     p.add_argument('--fp16', action='store_true', help='Mixed-precision training')
 
+    # Direct weight arguments (optional, overrides sweep grid if set)
+    p.add_argument('--dis_weight', type=float, default=None,
+                   help='Direct dis_weight (overrides grid if set)')
+    p.add_argument('--style_weight', type=float, default=None,
+                   help='Direct style_weight (overrides grid if set)')
+    p.add_argument('--sam_weight', type=float, default=None,
+                   help='Direct sam_weight (overrides grid if set)')
+    p.add_argument('--moment_weight', type=float, default=None,
+                   help='Direct moment_weight (overrides grid if set)')
+
     # Wandb passthroughs (one run per config)
     p.add_argument('--wandb', action='store_true')
     p.add_argument('--wandb_project', default='cs159')
@@ -130,8 +140,31 @@ def parse_sweep_values(spec: str) -> list[float]:
 
 def build_configs(sweep_values: list[float],
                   vgg_style_values: list[float],
-                  vgg_dis_values: list[float]) -> list[dict]:
-    """Build the ablation config list. Order is stable for fixed sweep values."""
+                  vgg_dis_values: list[float],
+                  dis_weight: float | None = None,
+                  style_weight: float | None = None,
+                  sam_weight: float | None = None,
+                  moment_weight: float | None = None) -> list[dict]:
+    """Build the ablation config list. Order is stable for fixed sweep values.
+    
+    If direct weight arguments are provided, return a single config with those weights.
+    """
+    # If direct weights are provided, return a single config.
+    if any(w is not None for w in [dis_weight, style_weight, sam_weight, moment_weight]):
+        config_name = 'custom'
+        if dis_weight is not None or style_weight is not None:
+            config_name = f"vgg_st{style_weight or 0:g}_ds{dis_weight or 0:g}"
+        if sam_weight is not None or moment_weight is not None:
+            config_name = f"spectral_sw{sam_weight or 0:g}_mw{moment_weight or 0:g}"
+        return [{
+            'name': config_name,
+            'family': 'custom',
+            'dis_weight': dis_weight or 0.0,
+            'style_weight': style_weight or 0.0,
+            'sam_weight': sam_weight or 0.0,
+            'moment_weight': moment_weight or 0.0,
+        }]
+    
     configs = []
     # vgg family: sweep style_weight x dis_weight.
     for stw in vgg_style_values:
@@ -333,6 +366,10 @@ def main() -> None:
         parse_sweep_values(args.sweep_values),
         parse_sweep_values(args.vgg_style_values),
         parse_sweep_values(args.vgg_dis_values),
+        dis_weight=args.dis_weight,
+        style_weight=args.style_weight,
+        sam_weight=args.sam_weight,
+        moment_weight=args.moment_weight,
     )
     args.output_root = os.path.abspath(args.output_root)
 
