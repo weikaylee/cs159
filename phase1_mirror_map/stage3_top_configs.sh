@@ -65,6 +65,7 @@ CUDA_VISIBLE_DEVICES=0 python "$CODE_DIR/train_mirror_map.py" \
     "${COMMON[@]}" \
     --output_dir     "$OUTPUT_ROOT/$CONFIG1" \
     --resume         "$STAGE2_ROOT/$CONFIG1/best.pt" \
+    --dis_weight 0 --style_weight 0 \
     --sam_weight     0.1 --moment_weight 1 \
     --wandb_run_name "stage3-$CONFIG1" &
 PID1=$!
@@ -73,6 +74,7 @@ CUDA_VISIBLE_DEVICES=1 python "$CODE_DIR/train_mirror_map.py" \
     "${COMMON[@]}" \
     --output_dir     "$OUTPUT_ROOT/$CONFIG2" \
     --resume         "$STAGE2_ROOT/$CONFIG2/best.pt" \
+    --dis_weight 0 --style_weight 0 \
     --sam_weight     1 --moment_weight 10 \
     --wandb_run_name "stage3-$CONFIG2" &
 PID2=$!
@@ -81,6 +83,7 @@ CUDA_VISIBLE_DEVICES=2 python "$CODE_DIR/train_mirror_map.py" \
     "${COMMON[@]}" \
     --output_dir     "$OUTPUT_ROOT/$CONFIG3" \
     --resume         "$STAGE2_ROOT/$CONFIG3/best.pt" \
+    --dis_weight 0 --style_weight 0 \
     --sam_weight     10 --moment_weight 10 \
     --wandb_run_name "stage3-$CONFIG3" &
 PID3=$!

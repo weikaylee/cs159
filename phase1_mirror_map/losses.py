@@ -324,11 +324,17 @@ class ConstraintLoss(nn.Module):
             dis = torch.zeros((), device=x_hat.device)
             style = torch.zeros((), device=x_hat.device)
         else:
-            feats_hat = self.vgg(x_hat)
-            feats_ref = self.vgg(x_ref)
-            dis = l_dis(feats_hat['content'], feats_ref['content'])
-            style = l_style(feats_hat['style'], feats_ref['style'],
-                    weights=self.vgg.style_weights)
+            # Disable autocast for the entire VGG path: torch.bmm (Gram matrix)
+            # and conv2d are autocast-eligible and would run in fp16, causing
+            # Gram entries O(H*W * a²) >> fp16 max (65504) to overflow → NaN.
+            # The explicit .float() on VGG input is not sufficient — autocast
+            # overrides it for eligible ops.
+            with torch.cuda.amp.autocast(enabled=False):
+                feats_hat = self.vgg(x_hat.float())
+                feats_ref = self.vgg(x_ref.float())
+                dis = l_dis(feats_hat['content'], feats_ref['content'])
+                style = l_style(feats_hat['style'], feats_ref['style'],
+                        weights=self.vgg.style_weights)
 
         sam = l_sam(x_hat, x_ref)
         moments = l_moments(x_hat, x_ref)
