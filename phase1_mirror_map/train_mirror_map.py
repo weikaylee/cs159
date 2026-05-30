@@ -298,6 +298,7 @@ def main():
             scaler.step(opt_g)
             scaler.step(opt_f)
             scaler.update()
+            g_phi.clip_weights()
 
             with torch.no_grad():
                 batch_metrics = reconstruction_metrics(losses['x_recon'], x)
