@@ -161,14 +161,21 @@ for s in SEASONS:
     run("python main.py --base configs/example_training/sentinel_dtu.yaml --enable_tf32 -t false --no-test true --predict true")
 
     season_results = os.path.join(RESULTS_DIR, s2_dir)
-    os.makedirs(season_results, exist_ok=True)
+    png_dir = os.path.join(season_results, "png")
+    tif_dir = os.path.join(season_results, "tif")
+    os.makedirs(png_dir, exist_ok=True)
+    os.makedirs(tif_dir, exist_ok=True)
     log_dirs = sorted(glob.glob(f"{EMRDM}/logs/*/sample"))
     if log_dirs:
         latest = log_dirs[-1]
-        run(f"cp -r {latest}/. {season_results}/")
-        print(f"  Results saved to {season_results}")
-        for f in glob.glob(f"{latest}/*.png"):
-            print(f"    {os.path.basename(f)}")
+        png_files = sorted(glob.glob(f"{latest}/*.png"))
+        tif_files = sorted(glob.glob(f"{latest}/*.tif"))
+        if png_files:
+            run(f"cp {latest}/*.png {png_dir}/")
+            print(f"  {len(png_files)} PNGs saved to {png_dir}")
+        if tif_files:
+            run(f"cp {latest}/*.tif {tif_dir}/")
+            print(f"  {len(tif_files)} TIFs saved to {tif_dir}")
 
 # # ============ STEP 11: Post-process PNGs for visualization ============
 # print("=== Post-processing PNGs ===")
