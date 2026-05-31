@@ -15,6 +15,7 @@
 #
 # TODO EDIT BEFORE SUBMITTING: --epochs, --mail-user, --partition, paths below.
 
+#SBATCH --exclusive
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
