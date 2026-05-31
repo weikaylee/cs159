@@ -137,3 +137,6 @@ makes the icnn (convex function) more curvy and "more convex" ... i think
 the old impl is still a (mostly) correct icnn implemtnation that faithfully follows amos et al eqns, but not tan et al impl -- namm uses the tan et al impl, 
 as shown in namm/icnn.py
 
+
+use run_emrdm.sh
+

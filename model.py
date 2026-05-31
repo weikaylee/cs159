@@ -67,30 +67,29 @@ if not os.path.exists(CKPT):
             f"Checkpoint not found at {CKPT}. Place it there or set EMRDM_DOWNLOAD_WEIGHTS=1."
         )
 
-# ============ STEP 5: Fix pkl files ============
-print("=== Fixing pkl files ===")
-s2_files = glob.glob(f"{DATA_ROOT}/ROIs1158_spring_s2/**/*.tif", recursive=True)
+# ============ STEP 5: Build pkl files and run per-season inference ============
+SEASONS = [
+    {"roi": "1158", "season": "spring"},
+    {"roi": "1868", "season": "summer"},
+    {"roi": "1970", "season": "fall"},
+    {"roi": "2017", "season": "winter"},
+]
 
-triplets = []
-for s2_path in s2_files:
-    basename = os.path.basename(s2_path)
-    suffix = basename.replace("ROIs1158_spring_s2_", "").replace(".tif", "")
-    scene = suffix.split("_p")[0]
-    s1_rel  = f"ROIs1158_spring_s1/s1_{scene}/ROIs1158_spring_s1_{suffix}.tif"
-    s2_rel  = f"ROIs1158_spring_s2/s2_{scene}/ROIs1158_spring_s2_{suffix}.tif"
-    s2c_rel = f"ROIs1158_spring_s2_cloudy/s2_cloudy_{scene}/ROIs1158_spring_s2_cloudy_{suffix}.tif"
-    if os.path.exists(os.path.join(DATA_ROOT, s1_rel)) and os.path.exists(os.path.join(DATA_ROOT, s2c_rel)):
-        triplets.append({"S1": s1_rel, "S2": s2_rel, "S2_cloudy": s2c_rel})
-
-n = len(triplets)
-train = triplets[:int(0.7*n)]
-val   = triplets[int(0.7*n):int(0.85*n)]
-test  = triplets[int(0.85*n):]
-
-for split, data in [("train", train), ("val", val), ("test", test)]:
-    with open(f"{DATA_ROOT}/all_{split}_paths.pkl", "wb") as f:
-        pickle.dump(data, f)
-    print(f"{split}: {len(data)} samples")
+def build_triplets(roi, season):
+    prefix = f"ROIs{roi}_{season}"
+    s2_dir = f"{prefix}_s2"
+    triplets = []
+    for s2_path in glob.glob(f"{DATA_ROOT}/{s2_dir}/**/*.tif", recursive=True):
+        basename = os.path.basename(s2_path)
+        suffix = basename.replace(f"{s2_dir}_", "").replace(".tif", "")
+        scene = suffix.split("_p")[0]
+        s1_rel  = f"{prefix}_s1/s1_{scene}/{prefix}_s1_{suffix}.tif"
+        s2_rel  = f"{s2_dir}/s2_{scene}/{s2_dir}_{suffix}.tif"
+        s2c_rel = f"{prefix}_s2_cloudy/s2_cloudy_{scene}/{prefix}_s2_cloudy_{suffix}.tif"
+        if (os.path.exists(os.path.join(DATA_ROOT, s1_rel)) and
+                os.path.exists(os.path.join(DATA_ROOT, s2c_rel))):
+            triplets.append({"S1": s1_rel, "S2": s2_rel, "S2_cloudy": s2c_rel})
+    return triplets
 
 # ============ STEP 6: Edit yaml ============
 print("=== Editing yaml ===")
@@ -132,28 +131,44 @@ if False and PATCH_NATTEN:
     else:
         print("Skipping natten patch (set EMRDM_PATCH_NATTEN=1 to enable)")
 
-# ============ STEP 8: Sanity check ============
-print("=== Sanity check ===")
-with open(f"{DATA_ROOT}/all_test_paths.pkl", "rb") as f:
-    test_data = pickle.load(f)
-print(f"Test samples: {len(test_data)}")
-print(f"S2 exists: {os.path.exists(os.path.join(DATA_ROOT, test_data[0]['S2']))}")
 print(f"Checkpoint exists: {os.path.exists(CKPT)}")
 
-# ============ STEP 9: Run inference ============
-print("=== Running inference ===")
+# ============ STEP 8–10: Per-season inference ============
 os.chdir(EMRDM)
-run(f"python main.py --base configs/example_training/sentinel_dtu.yaml --enable_tf32 -t false --no-test true --predict true")
+for s in SEASONS:
+    roi, season = s["roi"], s["season"]
+    s2_dir = f"ROIs{roi}_{season}_s2"
+    print(f"\n=== Season: {season} ({s2_dir}) ===")
 
-# ============ STEP 10: Copy results ============
-print("=== Copying results ===")
-log_dirs = sorted(glob.glob(f"{EMRDM}/logs/*/sample"))
-if log_dirs:
-    latest = log_dirs[-1]
-    run(f"cp -r {latest} {RESULTS_DIR}/")
-    print(f"Results saved to {RESULTS_DIR}")
-    for f in glob.glob(f"{latest}/*.png"):
-        print(f"  {os.path.basename(f)}")
+    triplets = build_triplets(roi, season)
+    if not triplets:
+        print(f"  No triplets found for {season}, skipping.")
+        continue
+    print(f"  {len(triplets)} triplets found")
+
+    n = len(triplets)
+    train = triplets[:int(0.7 * n)]
+    val   = triplets[int(0.7 * n):int(0.85 * n)]
+    test  = triplets[int(0.85 * n):]
+
+    for split, data in [("train", train), ("val", val), ("test", test), ("predict", triplets)]:
+        with open(f"{DATA_ROOT}/all_{split}_paths.pkl", "wb") as f:
+            pickle.dump(data, f)
+        print(f"  {split}: {len(data)}")
+
+    print(f"  S2 exists: {os.path.exists(os.path.join(DATA_ROOT, triplets[0]['S2']))}")
+
+    run("python main.py --base configs/example_training/sentinel_dtu.yaml --enable_tf32 -t false --no-test true --predict true")
+
+    season_results = os.path.join(RESULTS_DIR, s2_dir)
+    os.makedirs(season_results, exist_ok=True)
+    log_dirs = sorted(glob.glob(f"{EMRDM}/logs/*/sample"))
+    if log_dirs:
+        latest = log_dirs[-1]
+        run(f"cp -r {latest}/. {season_results}/")
+        print(f"  Results saved to {season_results}")
+        for f in glob.glob(f"{latest}/*.png"):
+            print(f"    {os.path.basename(f)}")
 
 # # ============ STEP 11: Post-process PNGs for visualization ============
 # print("=== Post-processing PNGs ===")
