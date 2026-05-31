@@ -15,13 +15,14 @@
 #
 # TODO EDIT BEFORE SUBMITTING: --epochs, --mail-user, --partition, paths below.
 
-#SBATCH --exclusive
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
 #SBATCH --gres=gpu:1
 #SBATCH --mem=64G
 #SBATCH --partition=gpu
+#SBATCH --exclude=hpc-93-36
+#SBATCH --exclusive
 #SBATCH --time=60:00:00
 
 #SBATCH -J "phase1-pred-spectral"
