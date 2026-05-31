@@ -1,7 +1,7 @@
 #!/bin/bash
-#SBATCH --exclusive
 #SBATCH --job-name=emrdm_infer
 #SBATCH --partition=gpu
+#SBATCH --exclusive
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32G
