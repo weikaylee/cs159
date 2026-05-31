@@ -8,6 +8,7 @@ Usage:
 """
 
 import os
+import shutil
 import subprocess
 import sys
 import pickle
@@ -69,8 +70,8 @@ if not os.path.exists(CKPT):
 
 # ============ STEP 5: Build pkl files and run per-season inference ============
 SEASONS = [
-    {"roi": "1158", "season": "spring"},
-    {"roi": "1868", "season": "summer"},
+    # {"roi": "1158", "season": "spring"},
+    # {"roi": "1868", "season": "summer"},
     {"roi": "1970", "season": "fall"},
     {"roi": "2017", "season": "winter"},
 ]
@@ -170,11 +171,13 @@ for s in SEASONS:
         latest = log_dirs[-1]
         png_files = sorted(glob.glob(f"{latest}/*.png"))
         tif_files = sorted(glob.glob(f"{latest}/*.tif"))
+        for f in png_files:
+            shutil.copy2(f, os.path.join(png_dir, os.path.basename(f)))
         if png_files:
-            run(f"cp {latest}/*.png {png_dir}/")
             print(f"  {len(png_files)} PNGs saved to {png_dir}")
+        for f in tif_files:
+            shutil.copy2(f, os.path.join(tif_dir, os.path.basename(f)))
         if tif_files:
-            run(f"cp {latest}/*.tif {tif_dir}/")
             print(f"  {len(tif_files)} TIFs saved to {tif_dir}")
 
 # # ============ STEP 11: Post-process PNGs for visualization ============
