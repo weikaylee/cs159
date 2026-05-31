@@ -53,7 +53,7 @@ def get_args():
 
 def load_models(args, device):
     icnn = ICNN(
-        n_channels=args.n_channels,
+        n_in_channels=args.n_channels,
         n_filters=args.icnn_filters,
         n_layers=args.icnn_layers,
         strong_convexity=args.strong_convexity,
