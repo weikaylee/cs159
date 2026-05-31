@@ -101,6 +101,7 @@ data:
         split: "train"
         region: "all"
         rescale: True
+        clip_target: False
         cloud_masks:
         paths_file: "all_train_paths_mirror.pkl"
     validation:
@@ -110,6 +111,7 @@ data:
         split: "val"
         region: "all"
         rescale: True
+        clip_target: False
         cloud_masks:
         paths_file: "all_val_paths_mirror.pkl"
     test:
@@ -119,6 +121,7 @@ data:
         split: "test"
         region: "all"
         rescale: True
+        clip_target: False
         cloud_masks:
         paths_file: "all_test_paths_mirror.pkl"
     predict:
@@ -128,6 +131,7 @@ data:
         split: "test"
         region: "all"
         rescale: True
+        clip_target: False
         cloud_masks:
         paths_file: "all_test_paths_mirror.pkl"
 lightning:
