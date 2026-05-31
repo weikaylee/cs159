@@ -52,7 +52,7 @@ python "$CODE_DIR/run_loss_ablation_predicted.py" \
     --output_root  "$OUTPUT_ROOT" \
     --roi          ROIs1158_spring \
     --epochs       3 \
-    --batch_size   16 \
+    --batch_size   8 \
     --lr           2e-4 \
     --num_workers  2 \
     --max_sigma    0.1 \
