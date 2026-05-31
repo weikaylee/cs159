@@ -51,6 +51,12 @@ def parse_args() -> argparse.Namespace:
         default=2,
         help="Number of GPUs for Lightning trainer.",
     )
+    parser.add_argument(
+        "--max_epochs",
+        type=int,
+        default=None,
+        help="Override max_epochs in the config (default: use config value).",
+    )
     parser.add_argument("--wandb", action="store_true", help="Enable W&B logging.")
     parser.add_argument("--wandb_project", default="cs159", help="W&B project name.")
     parser.add_argument(
@@ -104,7 +110,10 @@ def main() -> None:
         f"data.params.test.params.root={data_root}",
         f"data.params.predict.params.root={data_root}",
         f"lightning.trainer.devices={args.devices}",
+        "lightning.trainer.log_every_n_steps=1",
     ]
+    if args.max_epochs is not None:
+        overrides.append(f"lightning.trainer.max_epochs={args.max_epochs}")
 
     cmd = [
         sys.executable, "main.py",
