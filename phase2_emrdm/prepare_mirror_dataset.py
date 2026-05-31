@@ -97,6 +97,8 @@ def write_mirror_image(
     with torch.no_grad():
         y = g_phi(x.unsqueeze(0)).squeeze(0).cpu().numpy().astype(np.float32)
 
+    print(f"  mirror y: min={y.min():.4f} max={y.max():.4f} mean={y.mean():.4f}")
+
     # Scale by 10000 so the dataloader's /10000 rescale round-trips back to [0,1] mirror space.
     profile.update(dtype="float32", count=y.shape[0], compress="lzw")
     with rasterio.open(mirror_path, "w", **profile) as dst:
