@@ -42,7 +42,7 @@ conda activate emrdm
 DATA_ROOT="/resnick/groups/perona/oywang/cs159/data"
 EMRDM_ROOT="/resnick/groups/perona/oywang/cs159/results"
 CODE_DIR="/resnick/groups/perona/oywang/cs159/phase1_mirror_map"
-OUTPUT_ROOT="/resnick/groups/perona/oywang/cs159/runs/stage2_predicted_spectral"
+OUTPUT_ROOT="/resnick/groups/perona/oywang/cs159/runs/stage2_predicted_spectral_all"
 
 mkdir -p "$OUTPUT_ROOT"
 
