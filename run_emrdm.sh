@@ -10,6 +10,7 @@
 #SBATCH --error=/resnick/groups/perona/oywang/cs159/logs/emrdm_infer.%j.err
 #SBATCH --mail-type=BEGIN,END,FAIL
 #SBATCH --mail-user=oywang@caltech.edu
+#SBATCH --exclude=hpc-93-36
 
 set -euo pipefail
 
