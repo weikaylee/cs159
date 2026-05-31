@@ -21,6 +21,8 @@
 #SBATCH --gres=gpu:1
 #SBATCH --mem=64G
 #SBATCH --partition=gpu
+#SBATCH --exclude=hpc-93-36
+#SBATCH --exclusive
 #SBATCH --time=60:00:00
 
 #SBATCH -J "phase1-pred-spectral"
