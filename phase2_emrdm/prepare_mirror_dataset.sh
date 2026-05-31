@@ -9,15 +9,15 @@
 #SBATCH --mem=32G
 #SBATCH --time=02:00:00
 #SBATCH --partition=gpu
-#SBATCH --output=/resnick/groups/CS156b/from_central/2026/SSSClassCSNerds/cs159/phase2_emrdm/prep-mirror-dataset-%j.out
-#SBATCH --error=/resnick/groups/CS156b/from_central/2026/SSSClassCSNerds/cs159/phase2_emrdm/prep-mirror-dataset-%j.err
+#SBATCH --output=/resnick/groups/perona/oywang/cs159/logs/prep-mirror-dataset-%j.out
+#SBATCH --error=/resnick/groups/perona/oywang/cs159/logs/prep-mirror-dataset-%j.err
 
 # ── Environment ────────────────────────────────────────────────────────────────
 source ~/.bashrc
 conda activate emrdm
 
 # ── Paths ──────────────────────────────────────────────────────────────────────
-REPO_ROOT="/resnick/groups/CS156b/from_central/2026/SSSClassCSNerds/cs159"
+REPO_ROOT="/resnick/groups/perona/oywang/cs159"
 DATA_ROOT="${REPO_ROOT}/data"
 PHASE1_DIR="${REPO_ROOT}/phase1_mirror_map"
 PHASE2_DIR="${REPO_ROOT}/phase2_emrdm"
@@ -26,7 +26,7 @@ LOG_DIR="${REPO_ROOT}/logs"
 mkdir -p "${LOG_DIR}"
 
 # ── Step 1: Use pre-trained NAMM g_phi checkpoint ─────────────────────────────
-NAMM_CKPT="${REPO_ROOT}/sw0.1mw1_best.pt"
+NAMM_CKPT="${REPO_ROOT}/runs/stage3_top/spectral_sw0.1_mw1/best.pt"
 if [ ! -f "${NAMM_CKPT}" ]; then
     echo "ERROR: checkpoint not found at ${NAMM_CKPT}" >&2
     exit 1
