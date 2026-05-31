@@ -1,4 +1,3 @@
-# TODO: download namm model checkpoint and update NAMM_CKPT 
 #!/bin/bash
 
 #SBATCH --job-name=prepare_mirror_dataset
