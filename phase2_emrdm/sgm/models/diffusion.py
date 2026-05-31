@@ -169,7 +169,8 @@ class DiffusionEngine(pl.LightningModule):
         loss, loss_dict = self.shared_step(batch)
 
         self.log_dict(
-            loss_dict, prog_bar=True, logger=True, on_step=True, on_epoch=False
+            {"train/" + k: v for k, v in loss_dict.items()},
+            prog_bar=True, logger=True, on_step=True, on_epoch=False
         )
 
         self.log(
@@ -184,7 +185,7 @@ class DiffusionEngine(pl.LightningModule):
         if self.scheduler_config is not None:
             lr = self.optimizers().param_groups[0]["lr"]
             self.log(
-                "lr_abs", lr, prog_bar=True, logger=True, on_step=True, on_epoch=False
+                "train/lr_abs", lr, prog_bar=True, logger=True, on_step=True, on_epoch=False
             )
 
         return loss
@@ -404,14 +405,14 @@ class ResidualDiffusionEngine(DiffusionEngine):
             self.train_count += 1
             self.train_time += train_time
             avg_train_time = self.train_time / self.train_count
-            self.log_dict({"train_time": avg_train_time}, sync_dist=True, on_step=True, on_epoch=False)
+            self.log_dict({"train/train_time": avg_train_time}, sync_dist=True, on_step=True, on_epoch=False)
             # print(f"Train time: {avg_train_time} per batch.")      
     
     def get_input(self, batch, key):
         # assuming unified data format, dataloader returns a dict.
         # image tensors should be scaled to -1 ... 1 and in bchw format
         return batch[key]
-    
+
     def forward(self, x, mu, batch):
         loss = self.loss_fn(self.model, self.denoiser, self.conditioner, self.sigma2st, x, mu, batch)
         loss_mean = loss.mean()
@@ -614,7 +615,7 @@ class ResidualDiffusionEngine(DiffusionEngine):
         return denoise_grid
 
     @torch.no_grad()
-    def shared_test_step(self, batch):
+    def shared_test_step(self, batch, prefix=""):
         target = self.get_input(batch, self.input_key)
         mu = self.get_input(batch, self.mean_key)
         c, uc = self.conditioner.get_unconditional_conditioning(
@@ -638,27 +639,28 @@ class ResidualDiffusionEngine(DiffusionEngine):
             end_event.record()
             torch.cuda.synchronize()
             sample_time = start_event.elapsed_time(end_event)
-            self.log_dict({"sample_time": sample_time}, sync_dist=True, on_step=True, on_epoch=False)
-        
+            self.log_dict({prefix + "sample_time": sample_time}, sync_dist=True, on_step=True, on_epoch=False)
+
         for i in range(samples.shape[0]):
             _target = target[i,...]
             _samples = samples[i,...]
             _target = self.scale_01(_target)
             _samples = self.scale_01(_samples)
             metrics = self.img_metrics(target=_target.unsqueeze(0), pred=_samples.unsqueeze(0))
-            self.log_dict(metrics, sync_dist=True, batch_size=1, on_epoch=True)
+            self.log_dict({prefix + k: v for k, v in metrics.items()}, sync_dist=True, batch_size=1, on_epoch=True)
             _mu = self.scale_01(mu[i,...])
             raw_metrics = self.img_metrics(target=_target.unsqueeze(0), pred=_mu.unsqueeze(0))
-            raw_metrics = {"raw_" + k:v for k, v in raw_metrics.items()}
+            raw_metrics = {prefix + "raw_" + k: v for k, v in raw_metrics.items()}
             self.log_dict(raw_metrics, sync_dist=True, batch_size=1, on_epoch=True)
             self.avg_metrics.add(metrics)
-        
+
     @torch.no_grad()
     def validation_step(self, batch, batch_idx):
         _, loss_dict = self.shared_step(batch)
 
         self.log_dict(
-            loss_dict, prog_bar=True, logger=True, on_step=True, on_epoch=False
+            {"val/" + k: v for k, v in loss_dict.items()},
+            prog_bar=True, logger=True, on_step=True, on_epoch=False
         )
 
         self.log(
@@ -673,14 +675,14 @@ class ResidualDiffusionEngine(DiffusionEngine):
         if self.scheduler_config is not None:
             lr = self.optimizers().param_groups[0]["lr"]
             self.log(
-                "lr_abs", lr, prog_bar=True, logger=True, on_step=True, on_epoch=False
+                "val/lr_abs", lr, prog_bar=True, logger=True, on_step=True, on_epoch=False
             )
 
-        self.shared_test_step(batch=batch)
+        self.shared_test_step(batch=batch, prefix="val/")
 
     @torch.no_grad()
     def test_step(self, batch, batch_idx):
-        self.shared_test_step(batch=batch)
+        self.shared_test_step(batch=batch, prefix="test/")
 
     # def on_train_start(self):
     #     # flops, params = thop.profile(self.model.diffusion_model, inputs=(torch.randn([1,28,256,256],device=self.device),\
@@ -958,7 +960,7 @@ class TemporalResidualDiffusionEngine(ResidualDiffusionEngine):
 
     
     @torch.no_grad()
-    def shared_test_step(self, batch):
+    def shared_test_step(self, batch, prefix=""):
         target = self.get_input(batch, self.input_key)
         mu = self.get_input(batch, self.mean_key)
         c, uc = self.conditioner.get_unconditional_conditioning(
@@ -966,7 +968,7 @@ class TemporalResidualDiffusionEngine(ResidualDiffusionEngine):
             force_uc_zero_embeddings=[]
         )
         sampling_kwargs = {}
-        
+
         z_mu = self.encode_first_stage(mu)
         N = z_mu.shape[0]
         if self.count_sample_time:
@@ -982,15 +984,15 @@ class TemporalResidualDiffusionEngine(ResidualDiffusionEngine):
             end_event.record()
             torch.cuda.synchronize()
             sample_time = start_event.elapsed_time(end_event)
-            self.log_dict({"sample_time": sample_time}, sync_dist=True, on_step=True, on_epoch=False)
-        
+            self.log_dict({prefix + "sample_time": sample_time}, sync_dist=True, on_step=True, on_epoch=False)
+
         for i in range(samples.shape[0]):
             _target = target[i,...]
             _samples = samples[i,...]
             _target = self.scale_01(_target)
             _samples = self.scale_01(_samples)
             metrics = self.img_metrics(target=_target.unsqueeze(0), pred=_samples.unsqueeze(0))
-            self.log_dict(metrics, sync_dist=True, batch_size=1, on_epoch=True)
+            self.log_dict({prefix + k: v for k, v in metrics.items()}, sync_dist=True, batch_size=1, on_epoch=True)
             self.avg_metrics.add(metrics)
         # raw_metrics = img_metrics(target=target, pred=mu)
         # raw_metrics = {"raw_" + k:v for k, v in raw_metrics.items()}
