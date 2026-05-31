@@ -20,20 +20,21 @@
 #SBATCH --time=48:00:00
 #SBATCH --partition=gpu
 #SBATCH --constraint=epyc
-#SBATCH --output=/resnick/groups/CS156b/from_central/2026/SSSClassCSNerds/cs159/phase2_emrdm/slurm-emrdm-train-%j.out
-#SBATCH --error=/resnick/groups/CS156b/from_central/2026/SSSClassCSNerds/cs159/phase2_emrdm/slurm-emrdm-train-%j.err
+#SBATCH --output=/resnick/groups/perona/oywang/cs159/logs/slurm-emrdm-train-%j.out
+#SBATCH --error=/resnick/groups/perona/oywang/cs159/logs/slurm-emrdm-train-%j.err
 
 set -euo pipefail
 
-REPO_ROOT="/resnick/groups/CS156b/from_central/2026/SSSClassCSNerds/cs159"
+REPO_ROOT="/resnick/groups/perona/oywang/cs159"
 DATA_ROOT="${REPO_ROOT}/data"
 CODE_DIR="${REPO_ROOT}/phase2_emrdm"
-LOG_DIR="${REPO_ROOT}/logs"
+LOG_DIR="${REPO_ROOT}/runs"
 
 mkdir -p "${LOG_DIR}"
 # ── Environment ───────────────────────────────────────────────────────────────
-# source ~/.bashrc # NOTE: use this one olivia! (delete the line below) i think; uses ur conda path
-source /home/kwei2/miniforge3/etc/profile.d/conda.sh
+source ~/.bashrc 
+# NOTE: use this one olivia! (delete the line below) i think; uses ur conda path
+# source /home/kwei2/miniforge3/etc/profile.d/conda.sh
 conda activate emrdm
 
 # ── Training ──────────────────────────────────────────────────────────────────
