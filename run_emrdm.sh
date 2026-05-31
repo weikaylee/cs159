@@ -1,4 +1,5 @@
 #!/bin/bash
+#SBATCH --exclusive
 #SBATCH --job-name=emrdm_infer
 #SBATCH --partition=gpu
 #SBATCH --gres=gpu:1
