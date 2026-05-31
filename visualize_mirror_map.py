@@ -197,9 +197,9 @@ def main():
         y_batch  = g_phi(x_batch)
         xr_batch = f_psi(y_batch)
 
-    x_np  = x_batch.cpu().numpy()
-    y_np  = y_batch.cpu().numpy()
-    xr_np = xr_batch.cpu().numpy()
+    x_np  = x_batch.detach().cpu().numpy()
+    y_np  = y_batch.detach().cpu().numpy()
+    xr_np = xr_batch.detach().cpu().numpy()
 
     fig1 = plot_spatial_grid(x_np, y_np, xr_np, tifs, 0, 3)
     fig2 = plot_spectral_profiles(x_np, y_np, xr_np, tifs)
