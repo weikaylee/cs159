@@ -38,7 +38,8 @@ python "$CODE_DIR/train_mirror_map.py" \
     --roi          all \
     --epochs       100 \
     --batch_size   8 \
-    --lr           2e-4 \
+    --lr           5e-5 \
+    --emrdm_loss_weight 0.3 \
     --num_workers  4 \
     --max_sigma    0.1 \
     --fp16 \
