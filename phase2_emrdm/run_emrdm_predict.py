@@ -124,8 +124,17 @@ def patch_natten():
     natten 0.21.x (torch2100cu128): uses (n, h, w, nh, e) layout — requires
       switching the branch to 'if True'.
     """
-    from importlib.metadata import version as pkg_version
-    natten_ver = tuple(int(x) for x in pkg_version("natten").split("+")[0].split(".")[:2])
+    from importlib.metadata import version as pkg_version, PackageNotFoundError
+    try:
+        natten_ver_str = pkg_version("natten").split("+")[0]
+    except PackageNotFoundError:
+        try:
+            import natten as _natten
+            natten_ver_str = _natten.__version__.split("+")[0]
+        except ModuleNotFoundError:
+            print("  natten patch: skipped (natten not installed on this node)")
+            return
+    natten_ver = tuple(int(x) for x in natten_ver_str.split(".")[:2])
     need_021_patch = natten_ver >= (0, 21)
 
     transformer_path = os.path.join(
