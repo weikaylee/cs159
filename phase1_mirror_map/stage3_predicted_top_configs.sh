@@ -55,7 +55,7 @@ COMMON=(
     --emrdm_root   "$EMRDM_ROOT"
     --roi          all
     --epochs       100
-    --batch_size   16
+    --batch_size   8
     --lr           2e-4
     --num_workers  4
     --max_sigma    0.1
