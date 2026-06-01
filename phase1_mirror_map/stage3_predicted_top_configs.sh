@@ -2,9 +2,10 @@
 # Stage 3 (predicted) — Top 3 spectral configs from stage2_predicted_spectral_sweep,
 # warm-started from that sweep's best.pt, trained on EMRDM-predicted inputs.
 #
-# Fill in CONFIG1/CONFIG2/CONFIG3 and their weights after inspecting
-# runs/stage2_predicted_spectral/ablation_summary.csv (sort by val_sam).
-# Placeholder values below mirror the stage2_coarse results; update them.
+# Selected by best PSNR/SSIM/SAM balance from ablation_summary.csv:
+#   spectral_sw0.1_mw0.1  (best PSNR 34.19, minimal regularization baseline)
+#   spectral_sw1_mw0.1    (lowest MAE, strong SAM, low moment weight)
+#   spectral_sw1_mw1      (best SSIM 0.9243 + SAM 0.0702, balanced spectral)
 #
 # Calls train_mirror_map.py directly (not run_loss_ablation_predicted.py) so
 # --resume can be passed.  run_loss_ablation_predicted.py --collate_only at the
@@ -13,8 +14,7 @@
 # The three configs run in parallel, one per GPU.  If only 2 GPUs are
 # available, remove GPU2 / CONFIG3 and request --gres=gpu:2 / --ntasks=2.
 #
-# TODO EDIT BEFORE SUBMITTING: CONFIG names/weights from ablation_summary.csv,
-#                               --epochs, --mail-user, paths.
+# TODO EDIT BEFORE SUBMITTING: --epochs, --mail-user, paths.
 
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -44,11 +44,10 @@ OUTPUT_ROOT="/resnick/groups/perona/oywang/cs159/runs/stage3_predicted_top"
 
 mkdir -p "$OUTPUT_ROOT"
 
-# ── Top 3 configs from stage2_predicted_spectral (by val_sam) ────────────────
-# TODO: replace with actual top-3 names from ablation_summary.csv
-CONFIG1="spectral_sw0.1_mw1"
-CONFIG2="spectral_sw1_mw10"
-CONFIG3="spectral_sw10_mw10"
+# ── Top 3 configs from stage2_predicted_spectral (by PSNR/SSIM/SAM) ─────────
+CONFIG1="spectral_sw0.1_mw0.1"
+CONFIG2="spectral_sw1_mw0.1"
+CONFIG3="spectral_sw1_mw1"
 
 # ── Shared training args ──────────────────────────────────────────────────────
 COMMON=(
@@ -70,7 +69,7 @@ CUDA_VISIBLE_DEVICES=0 python "$CODE_DIR/train_mirror_map.py" \
     --output_dir     "$OUTPUT_ROOT/$CONFIG1" \
     --resume         "$STAGE2_ROOT/$CONFIG1/best.pt" \
     --dis_weight 0 --style_weight 0 \
-    --sam_weight     0.1 --moment_weight 1 \
+    --sam_weight     0.1 --moment_weight 0.1 \
     --wandb_run_name "pred-stage3-$CONFIG1" &
 PID1=$!
 
@@ -79,7 +78,7 @@ CUDA_VISIBLE_DEVICES=1 python "$CODE_DIR/train_mirror_map.py" \
     --output_dir     "$OUTPUT_ROOT/$CONFIG2" \
     --resume         "$STAGE2_ROOT/$CONFIG2/best.pt" \
     --dis_weight 0 --style_weight 0 \
-    --sam_weight     1 --moment_weight 10 \
+    --sam_weight     1 --moment_weight 0.1 \
     --wandb_run_name "pred-stage3-$CONFIG2" &
 PID2=$!
 
@@ -88,7 +87,7 @@ CUDA_VISIBLE_DEVICES=2 python "$CODE_DIR/train_mirror_map.py" \
     --output_dir     "$OUTPUT_ROOT/$CONFIG3" \
     --resume         "$STAGE2_ROOT/$CONFIG3/best.pt" \
     --dis_weight 0 --style_weight 0 \
-    --sam_weight     10 --moment_weight 10 \
+    --sam_weight     1 --moment_weight 1 \
     --wandb_run_name "pred-stage3-$CONFIG3" &
 PID3=$!
 
