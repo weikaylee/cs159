@@ -128,8 +128,12 @@ def patch_natten():
     try:
         natten_ver_str = pkg_version("natten").split("+")[0]
     except PackageNotFoundError:
-        import natten as _natten
-        natten_ver_str = _natten.__version__.split("+")[0]
+        try:
+            import natten as _natten
+            natten_ver_str = _natten.__version__.split("+")[0]
+        except ModuleNotFoundError:
+            print("  natten patch: skipped (natten not installed on this node)")
+            return
     natten_ver = tuple(int(x) for x in natten_ver_str.split(".")[:2])
     need_021_patch = natten_ver >= (0, 21)
 
