@@ -25,7 +25,7 @@ conda activate emrdm
 DATA_ROOT="/resnick/groups/perona/oywang/cs159/data"
 EMRDM_ROOT="/resnick/groups/perona/oywang/cs159/results"
 CODE_DIR="/resnick/groups/perona/oywang/cs159/phase1_mirror_map"
-STAGE2_ROOT="/resnick/groups/perona/oywang/cs159/runs/stage2_predicted_spectral"
+STAGE2_ROOT="/resnick/groups/perona/oywang/cs159/runs/stage2_predicted_spectral_all"
 OUTPUT_ROOT="/resnick/groups/perona/oywang/cs159/runs/stage3_predicted_top"
 
 mkdir -p "$OUTPUT_ROOT"
@@ -37,7 +37,7 @@ python "$CODE_DIR/train_mirror_map.py" \
     --emrdm_root   "$EMRDM_ROOT" \
     --roi          all \
     --epochs       100 \
-    --batch_size   16 \
+    --batch_size   8 \
     --lr           2e-4 \
     --num_workers  4 \
     --max_sigma    0.1 \
