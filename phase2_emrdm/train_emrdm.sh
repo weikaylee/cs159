@@ -37,7 +37,7 @@ mkdir -p "${LOG_DIR}"
 # ── Environment ───────────────────────────────────────────────────────────────
 # NOTE: use this one olivia! (delete the line below) i think; uses ur conda path
 # source /home/kwei2/miniforge3/etc/profile.d/conda.sh
-conda activate emrdm
+conda activate emrdm_test
 
 # ── Training ──────────────────────────────────────────────────────────────────
 cd "${CODE_DIR}"
