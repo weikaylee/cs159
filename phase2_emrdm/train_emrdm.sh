@@ -23,6 +23,9 @@
 #SBATCH --output=/resnick/groups/perona/oywang/cs159/logs/slurm-emrdm-train-%j.out
 #SBATCH --error=/resnick/groups/perona/oywang/cs159/logs/slurm-emrdm-train-%j.err
 
+# source bashrc before set -u to avoid unbound variable errors in /etc/bashrc
+source ~/.bashrc
+
 set -euo pipefail
 
 REPO_ROOT="/resnick/groups/perona/oywang/cs159"
@@ -32,7 +35,6 @@ LOG_DIR="${REPO_ROOT}/runs"
 
 mkdir -p "${LOG_DIR}"
 # ── Environment ───────────────────────────────────────────────────────────────
-source ~/.bashrc 
 # NOTE: use this one olivia! (delete the line below) i think; uses ur conda path
 # source /home/kwei2/miniforge3/etc/profile.d/conda.sh
 conda activate emrdm
