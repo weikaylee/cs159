@@ -512,7 +512,7 @@ def init_wandb(save_dir, opt, config, group_name, name_str):
     else:
         wandb.init(
             project=opt.projectname,
-            config=config,
+            config=OmegaConf.to_container(config, resolve=True, throw_on_missing=False),
             settings=wandb.Settings(code_dir="./sgm"),
             group=group_name,
             name=name_str,
