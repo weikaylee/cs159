@@ -29,7 +29,7 @@ source ~/.bashrc
 set -euo pipefail
 
 REPO_ROOT="/resnick/groups/perona/oywang/cs159"
-DATA_ROOT="${REPO_ROOT}/data/mirror_s2"
+DATA_ROOT="${REPO_ROOT}/data"
 CODE_DIR="${REPO_ROOT}/phase2_emrdm"
 LOG_DIR="${REPO_ROOT}/runs"
 
