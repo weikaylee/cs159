@@ -6,7 +6,7 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --gres=gpu:1
 #SBATCH --mem=32G
-#SBATCH --time=02:00:00
+#SBATCH --time=10:00:00
 #SBATCH --partition=gpu
 #SBATCH --output=/resnick/groups/perona/oywang/cs159/logs/prep-mirror-dataset-%j.out
 #SBATCH --error=/resnick/groups/perona/oywang/cs159/logs/prep-mirror-dataset-%j.err
@@ -44,4 +44,3 @@ python "${PHASE2_DIR}/prepare_mirror_dataset.py" \
     --icnn_layers      6 \
     --strong_convexity 0.3 \
     --seed             42 \
-    --overwrite
