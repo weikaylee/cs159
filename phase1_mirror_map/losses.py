@@ -262,6 +262,9 @@ def l_moments(x_hat: torch.Tensor,
               x_ref: torch.Tensor,
               eps: float = 1e-6) -> torch.Tensor:
     """Per-band mean + std matching across batch and spatial dims."""
+    # Cast to float32: std() over large spatial dims can overflow fp16.
+    x_hat = x_hat.float()
+    x_ref = x_ref.float()
     mean_hat = x_hat.mean(dim=(0, 2, 3))
     mean_ref = x_ref.mean(dim=(0, 2, 3))
     std_hat = x_hat.std(dim=(0, 2, 3), unbiased=False).clamp(min=eps)
@@ -364,10 +367,15 @@ def spectral_angle_mapper(x_hat: torch.Tensor,
         Scalar tensor: mean of arccos of per-pixel cosine similarity
         along the channel axis. Lower = more spectrally consistent.
     """
+    # Cast to float32: acos gradient = 1/sqrt(1-cos²) diverges near ±1 in fp16,
+    # and torch.acos is not autocast-promoted, so fp16 inputs produce NaN grads.
+    x_hat = x_hat.float()
+    x_ref = x_ref.float()
     dot = (x_hat * x_ref).sum(dim=1)
     nx = x_hat.norm(dim=1).clamp(min=eps)
     ny = x_ref.norm(dim=1).clamp(min=eps)
-    cos = (dot / (nx * ny)).clamp(-1.0, 1.0)
+    # Clamp strictly inside (-1, 1) to keep d(acos)/dx finite.
+    cos = (dot / (nx * ny)).clamp(-1.0 + 1e-6, 1.0 - 1e-6)
     return torch.acos(cos).mean()
 
 
