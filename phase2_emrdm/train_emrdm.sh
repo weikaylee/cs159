@@ -46,6 +46,7 @@ python train_emrdm.py \
     --devices    2 \
     --max_epochs 5 \
     --wandb \
-    --logdir     "${LOG_DIR}/emrdm_train"
+    --logdir     "${LOG_DIR}/emrdm_train" \
+    --resume     "${LOG_DIR}/emrdm_train/2026-06-01T11-21-43_example_training-sentinel_mirror_train_scratch/checkpoints/last.ckpt"
 
 echo "===== Finished: $(date) ====="
