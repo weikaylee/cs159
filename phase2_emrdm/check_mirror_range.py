@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Scan all mirror_s2 TIFs and report value ranges.
 
-Prints every file whose per-band max > 1.0 or min < 0.0 after the /10000
-normalisation applied by SEN12MSCRInterface, plus an overall summary.
+Reports:
+  - Any file containing NaN or Inf (these cause training NaN directly)
+  - Global min/max across the whole dataset (after the /10000 normalisation)
+  - The 10 most-extreme patches (lowest min, highest max)
 
-Usage (run from repo root or phase2_emrdm/):
+Usage:
     python phase2_emrdm/check_mirror_range.py --data_root /resnick/groups/perona/oywang/cs159/data
 """
 
@@ -27,39 +29,70 @@ def main():
     if not files:
         sys.exit(f"No TIFs found under {pattern}")
 
-    print(f"Scanning {len(files)} mirror TIFs in {args.mirror_subdir}/")
+    print(f"Scanning {len(files)} mirror TIFs in {args.mirror_subdir}/\n")
 
     global_min = float("inf")
     global_max = float("-inf")
-    n_bad = 0
+    n_nan = 0
+    n_inf = 0
+    records = []  # (fmin, fmax, rel_path)
 
     for i, path in enumerate(files, 1):
         with rasterio.open(path) as src:
-            y = src.read().astype("float32") / 10_000.0
+            raw = src.read().astype("float32")
 
-        fmin, fmax = float(y.min()), float(y.max())
+        has_nan = bool(np.isnan(raw).any())
+        has_inf = bool(np.isinf(raw).any())
+        if has_nan:
+            n_nan += 1
+            rel = path.split(args.mirror_subdir + "/")[-1]
+            print(f"  NaN  [{i:5d}] {rel}")
+        if has_inf:
+            n_inf += 1
+            rel = path.split(args.mirror_subdir + "/")[-1]
+            print(f"  Inf  [{i:5d}] {rel}")
+
+        y = raw / 10_000.0
+        fmin = float(np.nanmin(y))
+        fmax = float(np.nanmax(y))
         global_min = min(global_min, fmin)
         global_max = max(global_max, fmax)
+        records.append((fmin, fmax, path))
 
-        if fmin < 0.0 or fmax > 1.0:
-            n_bad += 1
-            rel = path.split(args.mirror_subdir + "/")[-1]
-            print(f"  [{i:5d}/{len(files)}] OUT OF RANGE  min={fmin:.4f}  max={fmax:.4f}  {rel}")
-
-        if i % 1000 == 0:
-            print(f"  ... checked {i}/{len(files)}, bad so far: {n_bad}")
+        if i % 2000 == 0:
+            print(f"  ... {i}/{len(files)}  running global min={global_min:.4f}  max={global_max:.4f}")
 
     print(f"\n{'='*60}")
-    print(f"Files scanned : {len(files)}")
-    print(f"Files out of [0,1]: {n_bad}")
-    print(f"Global min : {global_min:.6f}")
-    print(f"Global max : {global_max:.6f}")
-    if n_bad == 0:
-        print("All mirror TIFs are within [0, 1] — clipping is harmless.")
+    print(f"Files scanned    : {len(files)}")
+    print(f"Files with NaN   : {n_nan}  ← direct cause of training NaN if > 0")
+    print(f"Files with Inf   : {n_inf}")
+    print(f"Global min       : {global_min:.6f}")
+    print(f"Global max       : {global_max:.6f}")
+    print(f"Data range       : {global_max - global_min:.6f}")
+
+    print(f"\n10 patches with lowest min (most extreme negative):")
+    for fmin, fmax, path in sorted(records, key=lambda r: r[0])[:10]:
+        rel = path.split(args.mirror_subdir + "/")[-1]
+        print(f"  min={fmin:.4f}  max={fmax:.4f}  {rel}")
+
+    print(f"\n10 patches with highest max:")
+    for fmin, fmax, path in sorted(records, key=lambda r: -r[1])[:10]:
+        rel = path.split(args.mirror_subdir + "/")[-1]
+        print(f"  min={fmin:.4f}  max={fmax:.4f}  {rel}")
+
+    print(f"\n{'='*60}")
+    if n_nan > 0 or n_inf > 0:
+        print("ACTION NEEDED: NaN/Inf in mirror TIFs will cause training NaN.")
+        print("Re-run prepare_mirror_dataset.py (--overwrite) to regenerate these patches.")
+    elif global_min < -1.0 or global_max > 2.0:
+        print("CAUTION: Mirror values span a wide range. The EMRDM noise schedule")
+        print("(sigma_max=100) was tuned for [0,1] data. With this range the noise")
+        print("schedule may be mismatched — consider normalising g_phi outputs.")
     else:
-        print("Some TIFs exceed [0, 1]. SEN12MSCRInterface will clip these,")
-        print("which loses information. Consider re-running prepare_mirror_dataset.py")
-        print("without rescaling, or normalising g_phi outputs to [0, 1] before saving.")
+        print(f"No NaN/Inf. Values are in [{global_min:.3f}, {global_max:.3f}].")
+        print("The EMRDM can train in this range but the EDM sigma schedule assumes")
+        print("data ≈ [0,1]. Consider normalising mirror outputs to [0,1] before")
+        print("re-running prepare_mirror_dataset.py.")
 
 
 if __name__ == "__main__":
