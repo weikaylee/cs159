@@ -173,10 +173,20 @@ def load_denoiser(args, device: torch.device) -> EDMDenoiser:
             "Expected a checkpoint saved by train_mirror_diffusion.py."
         )
     denoiser.load_state_dict(ckpt["denoiser"])
+
+    # Prefer EMA weights for inference — they are smoother and give better quality.
+    if "ema" in ckpt:
+        from train_mirror_diffusion import EMA  # type: ignore
+        ema = EMA(denoiser, decay=0.999)
+        ema.load_state_dict(ckpt["ema"])
+        ema.apply(denoiser)  # swap in EMA weights permanently for inference
+        print(f"  EDMDenoiser loaded with EMA weights from {args.edm_ckpt}")
+    else:
+        print(f"  EDMDenoiser loaded (no EMA key — using raw weights) from {args.edm_ckpt}")
+
     denoiser.eval()
     for p in denoiser.parameters():
         p.requires_grad_(False)
-    print(f"  EDMDenoiser loaded from {args.edm_ckpt}")
     return denoiser
 
 
