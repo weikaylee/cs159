@@ -26,7 +26,7 @@ DATA_ROOT="/resnick/groups/perona/oywang/cs159/data"
 CODE_DIR="/resnick/groups/perona/oywang/cs159/phase2_emrdm"
 NAMM_CKPT="/resnick/groups/perona/oywang/cs159/runs/stage3_top/spectral_sw0.1_mw1/best.pt"
 EDM_CKPT="/resnick/groups/perona/oywang/cs159/runs/mirror_edm2/best.pt"
-OUTPUT_DIR="/resnick/groups/perona/oywang/cs159/output/mirror_diffusion_eval"
+OUTPUT_DIR="/resnick/groups/perona/oywang/cs159/output/mirror_diffusion_eval2"
 
 mkdir -p "$OUTPUT_DIR"
 
