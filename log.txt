@@ -165,3 +165,44 @@ TODO:
 
 - use pt file in da drive!
 
+# 6/2 phase 2 emrdm mirror space training
+
+verified phase 2 pipeline end-to-end:
+- prepare_mirror_dataset.sh: loads g_phi from namm best.pt, applies it to all clean s2 patches,
+  writes mirror-space TIFs to data_root/mirror_s2/ (scaled by 10000 for rasterio round-trip),
+  writes all_{train,val,test}_paths_mirror.pkl with S2 field pointing to mirror paths
+- train_emrdm.sh: calls train_emrdm.py which validates pkl files exist, then calls main.py with
+  sentinel_mirror_train_scratch.yaml (no ckpt_path = training from scratch)
+- SEN12MSCRInterface loads S2 from mirror paths as "target" key (what the diffusion model denoises)
+  and S2_cloudy from original paths as "S2" key (diffusion mean/conditioning)
+
+config fixes:
+- sentinel_mirror_train_scratch.yaml: changed monitor from "RMSE" to "val/RMSE" (model logs under
+  val/ prefix so bare "RMSE" key doesn't exist -> MisconfigurationException)
+- removed every_n_train_steps from modelcheckpoint (was triggering checkpoint at train steps when
+  val/RMSE not yet available, causing same error)
+- added clip_target: False to all four dataset splits (mirror values are negative, old clip to [0,1]
+  was zeroing all negatives and destroying mirror-space information)
+
+mirror space value range finding:
+- ran check_mirror_range.py on full mirror dataset (~120k+ files)
+- g_phi outputs are in approximately [-0.167, 0.1] after /10000 normalization
+- NOT in [0,1] as originally assumed. the ICNN gradient can output negative values
+- no NaN or Inf values in any TIF files (data is clean)
+- old clip_target=True was clipping all negatives to 0 -> targets were basically [0, 0.1]
+  -> explains why loss collapsed to 0.003 so fast (model just learned to output ~0)
+
+NaN training fix (slurm-emrdm-train-63962928):
+- loss decreased smoothly 0.4 -> 0.003 over 43769 steps, then NaN at step 43837 (96% through epoch 0)
+- root cause: ResidualEDMWeighting denominator collapses to ~1e-5 for rare small-sigma tail samples
+  (sigma ~0.0025, ~3.6 std below p_mean=-1.2). weight spikes to ~62000, gradient explodes with
+  no clipping -> weights go NaN permanently
+- fix 1: gradient_clip_val: 1.0 added to trainer config in sentinel_mirror_train_scratch.yaml
+- fix 2: .clamp(min=1e-4) on ResidualEDMWeighting denominator in loss_weighting.py
+  caps max weight at ~10000, prevents spike from rare tail sigma samples
+
+resume training:
+- lightning saves last.ckpt on timeout/interrupt via SetupCallback.on_exception
+- to resume: pass --resume <run-dir> to train_emrdm.sh (forwarded as -r flag to main.py)
+  main.py finds last.ckpt automatically from the run directory
+
