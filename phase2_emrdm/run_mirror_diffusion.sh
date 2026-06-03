@@ -47,7 +47,7 @@ python "$CODE_DIR/run_mirror_diffusion.py" \
     --steps        40 \
     --sigma_min    0.002 \
     --sigma_max    5.0 \
-    --max_samples   12 \
+    # --max_samples   12 \
     --rho          7.0 \
     --split        test \
     --batch_size   4 \
