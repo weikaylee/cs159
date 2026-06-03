@@ -267,6 +267,9 @@ def main():
             if isinstance(batch, (tuple, list)):
                 x, x_emrdm = batch
                 x_emrdm = x_emrdm.to(device, non_blocking=True)
+                # Guard against NaN/Inf in EMRDM output TIFs — corrupted patches
+                # pass NaN through create_graph=True Hessian and corrupt weights.
+                x_emrdm = torch.nan_to_num(x_emrdm, nan=0.0, posinf=1.0, neginf=0.0)
             else:
                 x, x_emrdm = batch, None
             x = x.to(device, non_blocking=True)
