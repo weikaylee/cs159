@@ -26,7 +26,7 @@ DATA_ROOT="/resnick/groups/perona/oywang/cs159/data"
 CODE_DIR="/resnick/groups/perona/oywang/cs159/phase2_emrdm"
 NAMM_CKPT="/resnick/groups/perona/oywang/cs159/runs/stage3_top/spectral_sw0.1_mw1/best.pt"
 EDM_CKPT="/resnick/groups/perona/oywang/cs159/runs/mirror_edm2/best.pt"
-OUTPUT_DIR="/resnick/groups/perona/oywang/cs159/output/mirror_diffusion_eval2"
+OUTPUT_DIR="/resnick/groups/perona/oywang/cs159/output/mirror_diffusion_eval3"
 
 mkdir -p "$OUTPUT_DIR"
 
@@ -46,7 +46,8 @@ python "$CODE_DIR/run_mirror_diffusion.py" \
     --sampler      heun \
     --steps        40 \
     --sigma_min    0.002 \
-    --sigma_max    80.0 \
+    --sigma_max    5.0 \
+    --max_samples   12 \
     --rho          7.0 \
     --split        test \
     --batch_size   4 \
@@ -56,7 +57,7 @@ python "$CODE_DIR/run_mirror_diffusion.py" \
 python "$CODE_DIR/visualize_mirror_diffusion.py" \
     --output_dir "$OUTPUT_DIR" \
     --data_root  "$DATA_ROOT" \
-    --n_samples  8 \
+    --n_samples  12 \
     --select     spread \
     --bands      rgb
 
