@@ -8,7 +8,7 @@ a side-by-side PNG: [Cloudy | Predicted | Ground Truth].
 Usage
 -----
     python phase2_emrdm/visualize_predictions.py \\
-        --output_dir  /resnick/.../output/mirror_diffusion \\
+        --output_dir  /resnick/.../output/mirror_diffusion_eval \\
         --data_root   /resnick/.../data \\
         --split       test \\
         --n_samples   12 \\
@@ -66,8 +66,10 @@ def load_split_index(data_root: str, split: str) -> dict:
         )
     with open(pkl, "rb") as f:
         samples = pickle.load(f)
+    # run_mirror_diffusion.py names output TIFs after os.path.basename(s["S2"])
+    # (the clean S2 file), so key by that stem — not the cloudy basename.
     return {
-        os.path.splitext(os.path.basename(s["S2_cloudy"]))[0]: s
+        os.path.splitext(os.path.basename(s["S2"]))[0]: s
         for s in samples
     }
 
