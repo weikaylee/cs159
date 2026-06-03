@@ -48,9 +48,19 @@ python "$CODE_DIR/run_mirror_diffusion.py" \
     --split        test \
     --batch_size   4 \
     --num_workers  4 \
-    --fp16
+    --fp16 \
+    && \
+python "$CODE_DIR/visualize_mirror_diffusion.py" \
+    --output_dir "$OUTPUT_DIR" \
+    --data_root  "$DATA_ROOT" \
+    --n_samples  8 \
+    --select     spread \
+    --bands      rgb
 
-# To also save raw mirror-space predictions, add:
+# To also save raw mirror-space predictions, add to run_mirror_diffusion.py:
 #   --save_mirror
 # To evaluate on val split instead of test, change:
 #   --split val
+# To generate SWIR false-colour visualisation instead of natural RGB, change:
+#   --bands swir
+
