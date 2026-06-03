@@ -43,14 +43,19 @@ def read_tif(path: str) -> np.ndarray:
 
 def to_rgb(img: np.ndarray, bands=RGB_BANDS, gamma: float = 1.0,
            percentile: float = 2.0) -> np.ndarray:
-    """Convert (C, H, W) float32 in [0,1] to (H, W, 3) uint8 for display.
+    """Convert (C, H, W) float32 to (H, W, 3) uint8 for display.
 
-    Applies per-channel percentile stretch then optional gamma correction.
+    Applies an independent percentile stretch per channel so that each of
+    R, G, B fills the full [0, 1] range. A global stretch (applied across
+    all channels combined) causes reddish/orange casts because Band 4
+    typically has higher reflectance than Band 2/3 — the global lo/hi is
+    dominated by the brighter channel and the darker ones are clipped near 0.
     """
-    rgb = np.stack([img[b] for b in bands], axis=-1)  # (H, W, 3)
-    lo  = np.percentile(rgb, percentile)
-    hi  = np.percentile(rgb, 100 - percentile)
-    rgb = np.clip((rgb - lo) / max(hi - lo, 1e-6), 0.0, 1.0)
+    rgb = np.stack([img[b] for b in bands], axis=-1).copy()  # (H, W, 3)
+    for c in range(3):
+        lo = np.percentile(rgb[:, :, c], percentile)
+        hi = np.percentile(rgb[:, :, c], 100 - percentile)
+        rgb[:, :, c] = np.clip((rgb[:, :, c] - lo) / max(hi - lo, 1e-6), 0.0, 1.0)
     if gamma != 1.0:
         rgb = rgb ** (1.0 / gamma)
     return (rgb * 255).astype("uint8")
