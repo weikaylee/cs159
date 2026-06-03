@@ -47,7 +47,6 @@ python "$CODE_DIR/run_mirror_diffusion.py" \
     --steps        40 \
     --sigma_min    0.002 \
     --sigma_max    5.0 \
-    # --max_samples   12 \
     --rho          7.0 \
     --split        test \
     --batch_size   4 \
@@ -67,4 +66,7 @@ python "$CODE_DIR/visualize_mirror_diffusion.py" \
 #   --split val
 # To generate SWIR false-colour visualisation instead of natural RGB, change:
 #   --bands swir
+
+
+# --max_samples   12 \
 
