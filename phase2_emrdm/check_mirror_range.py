@@ -36,6 +36,10 @@ def main():
     n_nan = 0
     n_inf = 0
     records = []  # (fmin, fmax, rel_path)
+    # Welford-style accumulators for global mean and std (finite values only)
+    total_sum    = 0.0
+    total_sq_sum = 0.0
+    total_count  = 0
 
     for i, path in enumerate(files, 1):
         with rasterio.open(path) as src:
@@ -53,6 +57,11 @@ def main():
             print(f"  Inf  [{i:5d}] {rel}")
 
         y = raw / 10_000.0
+        finite = y[np.isfinite(y)]
+        total_sum    += float(finite.sum())
+        total_sq_sum += float((finite ** 2).sum())
+        total_count  += finite.size
+
         fmin = float(np.nanmin(y))
         fmax = float(np.nanmax(y))
         global_min = min(global_min, fmin)
@@ -62,6 +71,9 @@ def main():
         if i % 2000 == 0:
             print(f"  ... {i}/{len(files)}  running global min={global_min:.4f}  max={global_max:.4f}")
 
+    global_mean = total_sum / max(total_count, 1)
+    global_std  = np.sqrt(max(total_sq_sum / max(total_count, 1) - global_mean ** 2, 0.0))
+
     print(f"\n{'='*60}")
     print(f"Files scanned    : {len(files)}")
     print(f"Files with NaN   : {n_nan}  ← direct cause of training NaN if > 0")
@@ -69,6 +81,8 @@ def main():
     print(f"Global min       : {global_min:.6f}")
     print(f"Global max       : {global_max:.6f}")
     print(f"Data range       : {global_max - global_min:.6f}")
+    print(f"Global mean      : {global_mean:.6f}")
+    print(f"Global std       : {global_std:.6f}  ← set --sigma_data to this value")
 
     print(f"\n10 patches with lowest min (most extreme negative):")
     for fmin, fmax, path in sorted(records, key=lambda r: r[0])[:10]:
@@ -84,15 +98,10 @@ def main():
     if n_nan > 0 or n_inf > 0:
         print("ACTION NEEDED: NaN/Inf in mirror TIFs will cause training NaN.")
         print("Re-run prepare_mirror_dataset.py (--overwrite) to regenerate these patches.")
-    elif global_min < -1.0 or global_max > 2.0:
-        print("CAUTION: Mirror values span a wide range. The EMRDM noise schedule")
-        print("(sigma_max=100) was tuned for [0,1] data. With this range the noise")
-        print("schedule may be mismatched — consider normalising g_phi outputs.")
     else:
-        print(f"No NaN/Inf. Values are in [{global_min:.3f}, {global_max:.3f}].")
-        print("The EMRDM can train in this range but the EDM sigma schedule assumes")
-        print("data ≈ [0,1]. Consider normalising mirror outputs to [0,1] before")
-        print("re-running prepare_mirror_dataset.py.")
+        print(f"No NaN/Inf. Data is in [{global_min:.3f}, {global_max:.3f}]  "
+              f"mean={global_mean:.3f}  std={global_std:.3f}")
+        print(f"→ Set --sigma_data {global_std:.3f} in train_mirror_diffusion.sh")
 
 
 if __name__ == "__main__":
