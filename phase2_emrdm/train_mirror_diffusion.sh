@@ -6,8 +6,10 @@
 #   2. all_train_paths.pkl and all_val_paths.pkl must exist under DATA_ROOT.
 #      Run eval_emrdm.py to generate them if missing:
 #        python phase2_emrdm/eval_emrdm.py --data_root <DATA_ROOT> --checkpoint <ckpt>
-#   3. Run check_mirror_range.sh first and set --sigma_data to the empirical
-#      std of the mirror dataset (default 0.1 is a reasonable starting point).
+#   3. Run check_mirror_range.sh first and set --sigma_data to the reported
+#      global std. Current estimate: 0.08 (from range [-0.174, 0.296]).
+#      Re-run check_mirror_range.sh to get the exact value — it now prints
+#      "Global std: X.XXX ← set --sigma_data to this value".
 #
 # Resume: re-submit this script unchanged after a timeout — the script detects
 #   last.pt automatically and resumes from it.
@@ -79,7 +81,7 @@ python "${PHASE2_DIR}/train_mirror_diffusion.py" \
     --base_ch           64              \
     --depth             4               \
     --emb_dim           256             \
-    --sigma_data        0.1             \
+    --sigma_data        0.08            \
     --P_mean            -1.2            \
     --P_std             1.2             \
     --epochs            100             \
