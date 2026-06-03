@@ -391,20 +391,23 @@ def val_metrics(
 # ─────────────────────────────────────────────────────────────────────────────
 # Checkpoint helpers
 # ─────────────────────────────────────────────────────────────────────────────
-def save_ckpt(path, epoch, denoiser, optimizer, scaler, best_val_loss):
+def save_ckpt(path, epoch, denoiser, optimizer, scheduler, scaler, best_val_loss):
     torch.save({
         "epoch":         epoch,
         "denoiser":      denoiser.state_dict(),
         "optimizer":     optimizer.state_dict(),
+        "scheduler":     scheduler.state_dict(),
         "scaler":        scaler.state_dict(),
         "best_val_loss": best_val_loss,
     }, path)
 
 
-def load_ckpt(path, denoiser, optimizer, scaler):
+def load_ckpt(path, denoiser, optimizer, scheduler, scaler):
     ckpt = torch.load(path, map_location="cpu")
     denoiser.load_state_dict(ckpt["denoiser"])
     optimizer.load_state_dict(ckpt["optimizer"])
+    if "scheduler" in ckpt:
+        scheduler.load_state_dict(ckpt["scheduler"])
     scaler.load_state_dict(ckpt["scaler"])
     print(f"  Resumed from epoch {ckpt['epoch']}  ({path})")
     return ckpt["epoch"], ckpt.get("best_val_loss", float("inf"))
@@ -444,8 +447,10 @@ def parse_args():
     # Training
     p.add_argument("--epochs",      type=int,   default=100)
     p.add_argument("--batch_size",  type=int,   default=4)
-    p.add_argument("--lr",          type=float, default=1e-4)
-    p.add_argument("--grad_clip",   type=float, default=1.0)
+    p.add_argument("--lr",           type=float, default=1e-4)
+    p.add_argument("--weight_decay", type=float, default=1e-4,
+                   help="AdamW weight decay — prevents overfitting (set 0 to disable)")
+    p.add_argument("--grad_clip",    type=float, default=1.0)
     p.add_argument("--fp16",        action="store_true")
     p.add_argument("--num_workers", type=int,   default=4)
     p.add_argument("--log_every",   type=int,   default=100)
@@ -519,7 +524,12 @@ def main():
     print(f"  EDMDenoiser: {n_params / 1e6:.1f}M parameters")
 
     # ── Optimiser & scaler ───────────────────────────────────────────────────
-    optimizer = torch.optim.Adam(denoiser.parameters(), lr=args.lr)
+    optimizer = torch.optim.AdamW(
+        denoiser.parameters(), lr=args.lr, weight_decay=args.weight_decay
+    )
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer, T_max=args.epochs, eta_min=args.lr / 10
+    )
     scaler    = GradScaler(enabled=args.fp16)
 
     # ── Resume ───────────────────────────────────────────────────────────────
@@ -527,7 +537,7 @@ def main():
     best_val_loss = float("inf")
     if args.resume:
         start_epoch, best_val_loss = load_ckpt(
-            args.resume, denoiser, optimizer, scaler
+            args.resume, denoiser, optimizer, scheduler, scaler
         )
 
     # ── Training loop ────────────────────────────────────────────────────────
@@ -615,16 +625,22 @@ def main():
             wandb.log({"val/loss": val_loss, "val/mae": val_mae,
                        "val/mse": val_mse, "epoch": epoch})
 
+        scheduler.step()
+        current_lr = scheduler.get_last_lr()[0]
+        if args.wandb:
+            import wandb
+            wandb.log({"train/lr": current_lr, "epoch": epoch})
+
         # ── Checkpoints ──────────────────────────────────────────────────────
         save_ckpt(
             os.path.join(args.output_dir, "last.pt"),
-            epoch + 1, denoiser, optimizer, scaler, best_val_loss,
+            epoch + 1, denoiser, optimizer, scheduler, scaler, best_val_loss,
         )
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             save_ckpt(
                 os.path.join(args.output_dir, "best.pt"),
-                epoch + 1, denoiser, optimizer, scaler, best_val_loss,
+                epoch + 1, denoiser, optimizer, scheduler, scaler, best_val_loss,
             )
             print(f"  → new best val_loss={best_val_loss:.4f}, saved best.pt")
 
