@@ -169,14 +169,15 @@ class ICNNGradient(nn.Module):
         Returns:
             g_x: (B, C, H, W) image in unconstrained mirror space.
         """
-        # enable_grad: requires_grad_(True) does not bypass an outer
-        # torch.no_grad() context — without this, autograd.grad fails because
-        # phi has no grad_fn. Callers (e.g. validate()) may freely use no_grad.
-        with torch.enable_grad():
-            x = x.requires_grad_(True)
-            phi = self.icnn.potential(x).sum()
-            g_x = torch.autograd.grad(phi, x, create_graph=self.training)[0]
-        return g_x
+        # Run in float32: when create_graph=True the backward pass computes the
+        # ICNN Hessian (d²phi/dx dw), which overflows fp16 on certain batches
+        # and corrupts model weights in a way the GradScaler cannot intercept.
+        # Disabling autocast here forces the potential + its gradient to fp32.
+        with torch.enable_grad(), torch.cuda.amp.autocast(enabled=False):
+            x_f32 = x.float().requires_grad_(True)
+            phi = self.icnn.potential(x_f32).sum()
+            g_x = torch.autograd.grad(phi, x_f32, create_graph=self.training)[0]
+        return g_x.to(x.dtype)
 
     def clip_weights(self):
         """Convenience passthrough so the training loop only needs one call."""
