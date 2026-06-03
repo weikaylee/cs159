@@ -36,7 +36,7 @@ REPO_ROOT="/resnick/groups/perona/oywang/cs159"
 DATA_ROOT="${REPO_ROOT}/data"
 PHASE2_DIR="${REPO_ROOT}/phase2_emrdm"
 LOG_DIR="${REPO_ROOT}/logs"
-OUTPUT_DIR="${REPO_ROOT}/runs/mirror_edm_final"
+OUTPUT_DIR="${REPO_ROOT}/runs/mirror_edm_final2"
 
 NAMM_CKPT="${REPO_ROOT}/runs/stage3_top/spectral_sw0.1_mw1/best.pt"
 
