@@ -13,6 +13,9 @@
 #SBATCH --mail-type=BEGIN
 #SBATCH --mail-type=END
 #SBATCH --mail-type=FAIL
+#SBATCH --output=/resnick/groups/perona/oywang/cs159/logs/mirror-edm-eval-%j.out
+#SBATCH --error=/resnick/groups/perona/oywang/cs159/logs/mirror-edm-eval-%j.err
+
 
 # ── Environment ──────────────────────────────────────────────────────────────
 source ~/.bashrc
