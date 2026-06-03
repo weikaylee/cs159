@@ -46,7 +46,8 @@ class ResidualEDMWeighting:
         sigma_data = self.sigma_input
         sigma_mu_square =  (((1 - st) / st) * self.sigma_mu) ** 2
         sigma_cov = self.sigma_cov * (1 - st) / st
-        return (sigma ** 2 + sigma_data ** 2 + sigma_mu_square + 2 * sigma_cov) / ((sigma ** 2 + sigma_mu_square) * (sigma_data ** 2) - sigma_cov ** 2)
+        denom = ((sigma ** 2 + sigma_mu_square) * (sigma_data ** 2) - sigma_cov ** 2).clamp(min=1e-4)
+        return (sigma ** 2 + sigma_data ** 2 + sigma_mu_square + 2 * sigma_cov) / denom
         # return (1. / sigma ** 2)
 
 class ResidualSoftMinSnrWeighting:
