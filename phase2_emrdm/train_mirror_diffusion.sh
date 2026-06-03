@@ -8,8 +8,7 @@
 #        python phase2_emrdm/eval_emrdm.py --data_root <DATA_ROOT> --checkpoint <ckpt>
 #   3. Run check_mirror_range.sh first and set --sigma_data to the reported
 #      global std. Current estimate: 0.08 (from range [-0.174, 0.296]).
-#      Re-run check_mirror_range.sh to get the exact value — it now prints
-#      "Global std: X.XXX ← set --sigma_data to this value".
+#      Confirmed value: std=0.033, mean=0.003 (range [-0.174, 0.296]).
 #
 # Resume: re-submit this script unchanged after a timeout — the script detects
 #   last.pt automatically and resumes from it.
@@ -37,7 +36,7 @@ REPO_ROOT="/resnick/groups/perona/oywang/cs159"
 DATA_ROOT="${REPO_ROOT}/data"
 PHASE2_DIR="${REPO_ROOT}/phase2_emrdm"
 LOG_DIR="${REPO_ROOT}/logs"
-OUTPUT_DIR="${REPO_ROOT}/runs/mirror_edm"
+OUTPUT_DIR="${REPO_ROOT}/runs/mirror_edm2"
 
 NAMM_CKPT="${REPO_ROOT}/runs/stage3_top/spectral_sw0.1_mw1/best.pt"
 
@@ -81,7 +80,7 @@ python "${PHASE2_DIR}/train_mirror_diffusion.py" \
     --base_ch           64              \
     --depth             4               \
     --emb_dim           256             \
-    --sigma_data        0.08            \
+    --sigma_data        0.033           \
     --P_mean            -1.2            \
     --P_std             1.2             \
     --epochs            100             \
