@@ -342,12 +342,19 @@ def parse_args():
     p.add_argument("--steps",     type=int,   default=40,
                    help="Number of denoising steps")
     p.add_argument("--sigma_min", type=float, default=0.002)
-    p.add_argument("--sigma_max", type=float, default=80.0)
+    p.add_argument("--sigma_max", type=float, default=5.0,
+                   help="Must stay within the training sigma distribution: "
+                        "exp(P_mean + 2*P_std) = exp(-1.2 + 2.4) ≈ 5. "
+                        "The original EMRDM default of 80 is calibrated for "
+                        "data std≈0.5; mirror data has std=0.033 so sigma=80 "
+                        "is ~2400x the data std and produces pure noise.")
     p.add_argument("--rho",       type=float, default=7.0,
                    help="Schedule curvature (Karras eq. 5)")
     # Data
     p.add_argument("--split",       default="test",
                    help="pkl split to evaluate: train / val / test")
+    p.add_argument("--max_samples", type=int, default=None,
+                   help="Limit inference to this many samples (useful for quick checks)")
     p.add_argument("--batch_size",  type=int, default=4)
     p.add_argument("--num_workers", type=int, default=4)
     # Misc
@@ -382,6 +389,9 @@ def main():
 
     print(f"\nLoading {args.split} samples ...")
     samples = load_samples(args.data_root, args.split)
+    if args.max_samples is not None:
+        samples = samples[: args.max_samples]
+        print(f"  Limiting to {len(samples)} samples (--max_samples)")
     dataset = SEN12MSCRTripletDataset(samples, args.data_root)
     loader  = DataLoader(
         dataset,
