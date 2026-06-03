@@ -70,6 +70,58 @@ except ImportError:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# EMA
+# ─────────────────────────────────────────────────────────────────────────────
+class EMA:
+    """Exponential moving average of model weights for inference.
+
+    Keeps a shadow copy of each trainable parameter:
+        shadow = decay * shadow + (1 - decay) * param
+
+    Use EMA weights at inference — they are smoother than the raw training
+    weights at any given step and typically give better sample quality.
+    decay=0.9999 averages over ~10K past steps; use 0.999 for small datasets.
+    """
+
+    def __init__(self, model: nn.Module, decay: float = 0.9999):
+        self.decay = decay
+        self.shadow: dict[str, torch.Tensor] = {
+            name: param.data.clone().float()
+            for name, param in model.named_parameters()
+            if param.requires_grad
+        }
+
+    @torch.no_grad()
+    def update(self, model: nn.Module) -> None:
+        for name, param in model.named_parameters():
+            if param.requires_grad:
+                self.shadow[name].mul_(self.decay).add_(
+                    param.data.float(), alpha=1.0 - self.decay
+                )
+
+    def apply(self, model: nn.Module) -> dict[str, torch.Tensor]:
+        """Swap model weights with EMA weights; return originals for restore."""
+        originals = {}
+        for name, param in model.named_parameters():
+            if param.requires_grad:
+                originals[name] = param.data.clone()
+                param.data.copy_(self.shadow[name].to(param.dtype))
+        return originals
+
+    @staticmethod
+    def restore(model: nn.Module, originals: dict[str, torch.Tensor]) -> None:
+        for name, param in model.named_parameters():
+            if param.requires_grad:
+                param.data.copy_(originals[name])
+
+    def state_dict(self) -> dict:
+        return {k: v.cpu() for k, v in self.shadow.items()}
+
+    def load_state_dict(self, state: dict) -> None:
+        self.shadow = {k: v.float() for k, v in state.items()}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Constants — match SEN12MSCRInterface in sgm/data/sentinel/sentinel.py
 # ─────────────────────────────────────────────────────────────────────────────
 S2_SCALE = 10_000.0
@@ -391,10 +443,11 @@ def val_metrics(
 # ─────────────────────────────────────────────────────────────────────────────
 # Checkpoint helpers
 # ─────────────────────────────────────────────────────────────────────────────
-def save_ckpt(path, epoch, denoiser, optimizer, scheduler, scaler, best_val_loss):
+def save_ckpt(path, epoch, denoiser, ema, optimizer, scheduler, scaler, best_val_loss):
     torch.save({
         "epoch":         epoch,
         "denoiser":      denoiser.state_dict(),
+        "ema":           ema.state_dict(),
         "optimizer":     optimizer.state_dict(),
         "scheduler":     scheduler.state_dict(),
         "scaler":        scaler.state_dict(),
@@ -402,9 +455,11 @@ def save_ckpt(path, epoch, denoiser, optimizer, scheduler, scaler, best_val_loss
     }, path)
 
 
-def load_ckpt(path, denoiser, optimizer, scheduler, scaler):
+def load_ckpt(path, denoiser, ema, optimizer, scheduler, scaler):
     ckpt = torch.load(path, map_location="cpu")
     denoiser.load_state_dict(ckpt["denoiser"])
+    if "ema" in ckpt:
+        ema.load_state_dict(ckpt["ema"])
     optimizer.load_state_dict(ckpt["optimizer"])
     if "scheduler" in ckpt:
         scheduler.load_state_dict(ckpt["scheduler"])
@@ -450,6 +505,9 @@ def parse_args():
     p.add_argument("--lr",           type=float, default=1e-4)
     p.add_argument("--weight_decay", type=float, default=1e-4,
                    help="AdamW weight decay — prevents overfitting (set 0 to disable)")
+    p.add_argument("--ema_decay",   type=float, default=0.999,
+                   help="EMA decay for inference weights (0.999 for ~1K-step average, "
+                        "0.9999 for ~10K-step average; use 0.999 with small datasets)")
     p.add_argument("--grad_clip",    type=float, default=1.0)
     p.add_argument("--fp16",        action="store_true")
     p.add_argument("--num_workers", type=int,   default=4)
@@ -523,6 +581,9 @@ def main():
     n_params = sum(p.numel() for p in denoiser.parameters() if p.requires_grad)
     print(f"  EDMDenoiser: {n_params / 1e6:.1f}M parameters")
 
+    ema = EMA(denoiser, decay=args.ema_decay)
+    print(f"  EMA decay: {args.ema_decay}")
+
     # ── Optimiser & scaler ───────────────────────────────────────────────────
     optimizer = torch.optim.AdamW(
         denoiser.parameters(), lr=args.lr, weight_decay=args.weight_decay
@@ -537,7 +598,7 @@ def main():
     best_val_loss = float("inf")
     if args.resume:
         start_epoch, best_val_loss = load_ckpt(
-            args.resume, denoiser, optimizer, scheduler, scaler
+            args.resume, denoiser, ema, optimizer, scheduler, scaler
         )
 
     # ── Training loop ────────────────────────────────────────────────────────
@@ -568,6 +629,7 @@ def main():
             torch.nn.utils.clip_grad_norm_(denoiser.parameters(), args.grad_clip)
             scaler.step(optimizer)
             scaler.update()
+            ema.update(denoiser)
 
             step_losses.append(loss.item())
             global_step += 1
@@ -589,8 +651,9 @@ def main():
                     import wandb
                     wandb.log({"train/loss": mean_loss, "step": global_step})
 
-        # ── Validation ───────────────────────────────────────────────────────
+        # ── Validation (run under EMA weights) ───────────────────────────────
         denoiser.eval()
+        orig_weights = ema.apply(denoiser)
         v_losses, v_maes, v_mses = [], [], []
         with torch.no_grad():
             for s2_clean, s1s2 in val_loader:
@@ -625,6 +688,9 @@ def main():
             wandb.log({"val/loss": val_loss, "val/mae": val_mae,
                        "val/mse": val_mse, "epoch": epoch})
 
+        ema.restore(denoiser, orig_weights)
+        denoiser.train()
+
         scheduler.step()
         current_lr = scheduler.get_last_lr()[0]
         if args.wandb:
@@ -634,13 +700,13 @@ def main():
         # ── Checkpoints ──────────────────────────────────────────────────────
         save_ckpt(
             os.path.join(args.output_dir, "last.pt"),
-            epoch + 1, denoiser, optimizer, scheduler, scaler, best_val_loss,
+            epoch + 1, denoiser, ema, optimizer, scheduler, scaler, best_val_loss,
         )
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             save_ckpt(
                 os.path.join(args.output_dir, "best.pt"),
-                epoch + 1, denoiser, optimizer, scheduler, scaler, best_val_loss,
+                epoch + 1, denoiser, ema, optimizer, scheduler, scaler, best_val_loss,
             )
             print(f"  → new best val_loss={best_val_loss:.4f}, saved best.pt")
 
