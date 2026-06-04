@@ -189,7 +189,13 @@ class SEN12MSCREMRDMOutputDataset(Dataset):
                 f"No EMRDM predicted .tif files found under {emrdm_root}."
             )
 
-        pred_map = {os.path.basename(p): p for p in pred_files}
+        # Predictions are named after the cloudy input (e.g. ROIs..._s2_cloudy_100_p101.tif)
+        # while GT files use the clean-s2 name (ROIs..._s2_100_p101.tif).
+        # Normalize by dropping _cloudy so both sides use the same key.
+        pred_map = {
+            os.path.basename(p).replace('_s2_cloudy_', '_s2_'): p
+            for p in pred_files
+        }
         paired = []
         missing = []
         for gt in gt_files:

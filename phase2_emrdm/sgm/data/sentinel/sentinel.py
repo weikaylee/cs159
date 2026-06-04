@@ -3,18 +3,17 @@
 Reads triplets from a pkl file produced by eval_emrdm.py (or diffusion_check.py)
 and returns a batch dict that matches the keys expected by ResidualDiffusionEngine:
 
-    "target"     (C, H, W) float32 [0, 1]  — cloud-free S2  (input_key)
-    "S2"         (C, H, W) float32 [0, 1]  — cloudy S2       (mean_key)
-    "S1S2"      (2+C, H, W) float32 [0,1]  — S1 ‖ S2_cloudy  (conditioner)
+    "target"     (C, H, W) float32 [-1, 1]  — cloud-free S2  (input_key)
+    "S2"         (C, H, W) float32 [-1, 1]  — cloudy S2       (mean_key)
+    "S1S2"      (2+C, H, W) float32 [-1, 1]  — S1 ‖ S2_cloudy  (conditioner)
     "image_path"  str                        — basename of the S2_cloudy file
 
 pkl format (relative paths from root):
     [{"S1": rel, "S2": rel, "S2_cloudy": rel}, ...]
 
 Normalisation:
-    S2  (uint16, [0, 10000] reflectance) ÷ 10000  →  [0, 1]
-    S1  (float32, dB, approx [-25, 0])  linear clamp  →  [0, 1]
-        # TODO: verify S1 dB range against your archive if results look wrong
+    S2  (uint16, [0, 10000] reflectance) ÷ 10000 → [0, 1] → ×2−1 → [-1, 1]
+    S1  (float32, dB, approx [-25, 0])  linear clamp → [0, 1] → ×2−1 → [-1, 1]
 """
 
 import os
@@ -113,10 +112,9 @@ class SEN12MSCRInterface(Dataset):
         s2c = self._read_tif(os.path.join(self.root, s["S2_cloudy"]))  # (13, H, W)  cloudy
 
         if self.rescale:
-            s2  = np.clip(s2  / S2_SCALE, 0.0, 1.0)
-            s2c = np.clip(s2c / S2_SCALE, 0.0, 1.0)
-            # TODO: verify S1_DB_MIN / S1_DB_MAX match your archive.
-            s1  = np.clip((s1 - S1_DB_MIN) / (S1_DB_MAX - S1_DB_MIN), 0.0, 1.0)
+            s2  = np.clip(s2  / S2_SCALE, 0.0, 1.0) * 2.0 - 1.0
+            s2c = np.clip(s2c / S2_SCALE, 0.0, 1.0) * 2.0 - 1.0
+            s1  = np.clip((s1 - S1_DB_MIN) / (S1_DB_MAX - S1_DB_MIN), 0.0, 1.0) * 2.0 - 1.0
 
         # S1S2 = SAR (2ch) || cloudy S2 (13ch) = 15ch conditioning tensor
         s1s2 = np.concatenate([s1, s2c], axis=0)
