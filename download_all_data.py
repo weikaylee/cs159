@@ -30,6 +30,8 @@ import shutil
 import subprocess
 import sys
 import tarfile
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 DEST = Path("data")
@@ -58,7 +60,15 @@ ARCHIVES = [
 _EXTRACT_KW = {"filter": "data"} if sys.version_info >= (3, 12) else {}
 
 
-def stream_archive(archive):
+_print_lock = threading.Lock()
+
+
+def _log(msg: str) -> None:
+    with _print_lock:
+        print(msg, flush=True)
+
+
+def stream_archive(archive: str) -> None:
     """Stream <archive> from FTP via wget and extract every .tif member."""
     url = f"{FTP_BASE}/{archive}"
     proc = subprocess.Popen(
@@ -94,15 +104,33 @@ def main():
         shutil.rmtree(DEST / subdir, ignore_errors=True)
     DEST.mkdir(exist_ok=True)
 
-    for archive, subdir in ARCHIVES:
-        print(f"==> {archive} (full extraction)")
-        stream_archive(archive)
-        print(f"    extracted into {DEST / subdir}")
+    # Download all archives in parallel — each is an independent FTP stream.
+    n_workers = min(len(ARCHIVES), 6)
+    print(f"Downloading {len(ARCHIVES)} archives with {n_workers} parallel workers ...")
+
+    failed = []
+    with ThreadPoolExecutor(max_workers=n_workers) as pool:
+        futures = {
+            pool.submit(stream_archive, archive): (archive, subdir)
+            for archive, subdir in ARCHIVES
+        }
+        for future in as_completed(futures):
+            archive, subdir = futures[future]
+            try:
+                future.result()
+                _log(f"  [done] {archive} → {DEST / subdir}")
+            except Exception as exc:
+                _log(f"  [FAIL] {archive}: {exc}")
+                failed.append(archive)
+
+    if failed:
+        print(f"\nFailed archives ({len(failed)}): {failed}", file=sys.stderr)
+        sys.exit(1)
 
     (DEST / ".done").touch()
     print(f"\n=======================================")
-    print(f"Local subset ready at: {DEST.resolve()}")
-    print("Full spring triplet extracted")
+    print(f"Local data ready at: {DEST.resolve()}")
+    print("All archives extracted successfully.")
 
 
 if __name__ == "__main__":
