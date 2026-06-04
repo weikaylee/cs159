@@ -5,6 +5,7 @@
 #SBATCH --gres=gpu:1
 #SBATCH --mem=64G
 #SBATCH --partition=gpu
+#SBATCH --constraint=epyc
 
 #SBATCH --time=12:00:00   # eval is shorter than training; adjust if needed
 
