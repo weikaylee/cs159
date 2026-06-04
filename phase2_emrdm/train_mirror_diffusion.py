@@ -404,18 +404,37 @@ class EDMDenoiser(nn.Module):
 def edm_loss(
     denoiser: EDMDenoiser,
     y:    torch.Tensor,   # (B, 13, H, W) mirror-space clean target
-    s1s2: torch.Tensor,   # (B, 15, H, W) conditioning
+    s1s2: torch.Tensor,   # (B, 15, H, W) conditioning: SAR (ch0-1) + cloudy S2 (ch2-14)
     P_mean: float = -1.2,
     P_std:  float = 1.2,
+    s2_dropout: float = 0.0,
 ) -> torch.Tensor:
-    """Standard EDM training loss (Karras et al. 2022, Algorithm 1)."""
+    """Standard EDM training loss (Karras et al. 2022, Algorithm 1).
+
+    s2_dropout: per-sample probability of zeroing the 13 cloudy-S2 channels
+    (ch 2-14) while keeping SAR (ch 0-1). Forces the model to learn cloud
+    removal from SAR alone on those steps, improving heavy-cloud robustness.
+    """
     sd = denoiser.sigma_data
     sigma  = (P_mean + P_std * torch.randn(y.shape[0], device=y.device)).exp()
     y_noisy = y + sigma[:, None, None, None] * torch.randn_like(y)
 
+    # Per-sample S2 dropout: zero cloudy-S2 channels, keep SAR channels.
+    if s2_dropout > 0.0:
+        s1s2 = s1s2.clone()
+        drop_mask = torch.rand(y.shape[0], device=y.device) < s2_dropout  # (B,)
+        s1s2[drop_mask, 2:, :, :] = 0.0   # zero ch2-14; ch0-1 (SAR) unchanged
+
     D = denoiser(y_noisy, sigma, s1s2)
 
-    weight = (sigma ** 2 + sd ** 2) / (sigma * sd) ** 2   # (B,) — always stable
+    weight = (sigma ** 2 + sd ** 2) / (sigma * sd) ** 2   # (B,)
+    # TODO: if loss=nan occurs during training, add this weight cap —
+    #   weight = weight.clamp(max=1.0 / sd ** 2)
+    # With sd=0.033, a tail sigma~0.001 gives weight~160K which overflows.
+    # The cap sets the ceiling at 1/sd^2 ≈ 918 (the value at sigma→0 relative
+    # to sigma_data), matching EDM's soft-minSNR intent without distorting
+    # the normal training range. Also add a skip-bad-step guard in the loop:
+    #   if not loss.isfinite(): optimizer.zero_grad(); scaler.update(); continue
     return (weight[:, None, None, None] * (D - y) ** 2).mean()
 
 
@@ -505,6 +524,10 @@ def parse_args():
     p.add_argument("--lr",           type=float, default=1e-4)
     p.add_argument("--weight_decay", type=float, default=1e-4,
                    help="AdamW weight decay — prevents overfitting (set 0 to disable)")
+    p.add_argument("--s2_dropout",  type=float, default=0.15,
+                   help="Per-sample probability of zeroing cloudy-S2 conditioning "
+                        "channels (ch2-14) while keeping SAR (ch0-1). Improves "
+                        "heavy-cloud robustness by forcing SAR-only inference.")
     p.add_argument("--ema_decay",   type=float, default=0.999,
                    help="EMA decay for inference weights (0.999 for ~1K-step average, "
                         "0.9999 for ~10K-step average; use 0.999 with small datasets)")
@@ -622,7 +645,8 @@ def main():
 
             optimizer.zero_grad()
             with autocast(enabled=args.fp16):
-                loss = edm_loss(denoiser, mirror_target, s1s2, args.P_mean, args.P_std)
+                loss = edm_loss(denoiser, mirror_target, s1s2,
+                               args.P_mean, args.P_std, args.s2_dropout)
 
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer)
