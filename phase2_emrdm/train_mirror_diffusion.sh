@@ -25,8 +25,8 @@
 #SBATCH --time=48:00:00
 #SBATCH --partition=gpu
 #SBATCH --constraint=epyc
-#SBATCH --output=/resnick/groups/perona/oywang/cs159/logs/mirror-edm-train-%j.out
-#SBATCH --error=/resnick/groups/perona/oywang/cs159/logs/mirror-edm-train-%j.err
+#SBATCH --output=/resnick/groups/perona/oywang/cs159/logs/mirror-edm-train-dropout-%j.out
+#SBATCH --error=/resnick/groups/perona/oywang/cs159/logs/mirror-edm-train-dropout-%j.err
 
 source ~/.bashrc
 set -euo pipefail
@@ -36,7 +36,7 @@ REPO_ROOT="/resnick/groups/perona/oywang/cs159"
 DATA_ROOT="${REPO_ROOT}/data"
 PHASE2_DIR="${REPO_ROOT}/phase2_emrdm"
 LOG_DIR="${REPO_ROOT}/logs"
-OUTPUT_DIR="${REPO_ROOT}/runs/mirror_edm_final2"
+OUTPUT_DIR="${REPO_ROOT}/runs/mirror_edm_final_dropout"
 
 NAMM_CKPT="${REPO_ROOT}/runs/stage3_top/spectral_sw0.1_mw1/best.pt"
 
