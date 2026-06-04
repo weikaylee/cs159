@@ -25,8 +25,8 @@ conda activate emrdm    # re-use the EMRDM env: torch, rasterio, torchvision
 DATA_ROOT="/resnick/groups/perona/oywang/cs159/data"
 CODE_DIR="/resnick/groups/perona/oywang/cs159/phase2_emrdm"
 NAMM_CKPT="/resnick/groups/perona/oywang/cs159/runs/stage3_top/spectral_sw0.1_mw1/best.pt"
-EDM_CKPT="/resnick/groups/perona/oywang/cs159/runs/mirror_edm_final2/best.pt"
-OUTPUT_DIR="/resnick/groups/perona/oywang/cs159/output/mirror_diffusion_eval4"
+EDM_CKPT="/resnick/groups/perona/oywang/cs159/runs/mirror_edm_final_dropout/best.pt"
+OUTPUT_DIR="/resnick/groups/perona/oywang/cs159/output/mirror_diffusion_eval_dropout"
 
 mkdir -p "$OUTPUT_DIR"
 
