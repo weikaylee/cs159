@@ -60,7 +60,9 @@ from torch.utils.data import DataLoader, Dataset
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "phase1_mirror_map"))
 
-from icnn import ICNN, ICNNGradient  # type: ignore
+from icnn import ICNN, ICNNGradient          # type: ignore
+from inverse_map import InverseMap           # type: ignore
+from losses import reconstruction_metrics    # type: ignore
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 try:
@@ -227,6 +229,26 @@ def load_g_phi(args, device: torch.device) -> ICNNGradient:
         p.requires_grad_(False)
     print(f"  g_phi loaded and frozen from {args.namm_ckpt}")
     return g_phi
+
+
+def load_f_psi(args, device: torch.device):
+    """Load frozen f_psi from the Phase 1 checkpoint for reflectance-space metrics."""
+    ckpt = torch.load(args.namm_ckpt, map_location="cpu")
+    if "f_psi" not in ckpt:
+        print("  WARNING: checkpoint has no 'f_psi' key — reflectance metrics disabled.")
+        return None
+    f_psi = InverseMap(
+        n_channels=args.n_channels,
+        ngf=args.ngf,
+        n_res_blocks=args.n_res_blocks,
+        residual=True,
+    ).to(device)
+    f_psi.load_state_dict(ckpt["f_psi"])
+    f_psi.eval()
+    for p in f_psi.parameters():
+        p.requires_grad_(False)
+    print(f"  f_psi loaded and frozen from {args.namm_ckpt}")
+    return f_psi
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -420,9 +442,17 @@ def edm_loss(
     y_noisy = y + sigma[:, None, None, None] * torch.randn_like(y)
 
     # Per-sample S2 dropout: zero cloudy-S2 channels, keep SAR channels.
+    # Dropout is weighted by per-patch cloud coverage so clear-sky patches
+    # (where S2 is accurate and spectrally informative) are dropped rarely,
+    # and heavily cloudy patches are dropped at the full s2_dropout rate.
+    # Proxy for cloud coverage: mean of blue band (s1s2 ch2, B02 in [0,1]).
+    # Clouds are bright in blue; clear sky is dark. Threshold ~0.3 separates them.
     if s2_dropout > 0.0:
         s1s2 = s1s2.clone()
-        drop_mask = torch.rand(y.shape[0], device=y.device) < s2_dropout  # (B,)
+        blue_band = s1s2[:, 2, :, :].mean(dim=(-2, -1))        # (B,) mean blue brightness
+        cloud_weight = (blue_band / 0.3).clamp(0.0, 1.0)       # 0 = clear, 1 = cloudy
+        effective_rate = s2_dropout * cloud_weight              # (B,) per-sample rate
+        drop_mask = torch.rand(y.shape[0], device=y.device) < effective_rate
         s1s2[drop_mask, 2:, :, :] = 0.0   # zero ch2-14; ch0-1 (SAR) unchanged
 
     D = denoiser(y_noisy, sigma, s1s2)
@@ -443,20 +473,42 @@ def edm_loss(
 # ─────────────────────────────────────────────────────────────────────────────
 @torch.no_grad()
 def val_metrics(
-    denoiser: EDMDenoiser,
-    y:    torch.Tensor,
-    s1s2: torch.Tensor,
+    denoiser:  EDMDenoiser,
+    y:         torch.Tensor,          # (B, 13, H, W) mirror-space target
+    s1s2:      torch.Tensor,          # (B, 15, H, W) conditioning
+    s2_clean:  torch.Tensor,          # (B, 13, H, W) ground-truth reflectance [0,1]
+    f_psi=None,                       # frozen InverseMap or None
     sigma_eval: float = 0.05,
 ) -> dict:
-    """Denoising quality at a fixed low sigma (mirror space)."""
-    sigma = torch.full((y.shape[0],), sigma_eval, device=y.device)
+    """Denoising quality at a fixed low sigma.
+
+    Mirror-space metrics (mae_mirror, mse_mirror) are always computed.
+    Reflectance-space SEN12MS-CR benchmark metrics (mae, sam, psnr, ssim)
+    are computed when f_psi is provided by applying f_psi to the denoised
+    mirror prediction and comparing against the ground-truth clean S2.
+    Note: these use a single denoising step at sigma_eval as a proxy —
+    values will be pessimistic vs. full sampler inference but track improvement.
+    """
+    sigma   = torch.full((y.shape[0],), sigma_eval, device=y.device)
     y_noisy = y + sigma[:, None, None, None] * torch.randn_like(y)
-    pred = denoiser(y_noisy, sigma, s1s2)
-    err  = pred - y
-    return {
-        "mae": err.abs().mean().item(),
-        "mse": (err ** 2).mean().item(),
+    pred_mirror = denoiser(y_noisy, sigma, s1s2)
+
+    err = pred_mirror - y
+    out = {
+        "mae_mirror": err.abs().mean().item(),
+        "mse_mirror": (err ** 2).mean().item(),
+        "mae": None, "sam": None, "psnr": None, "ssim": None,
     }
+
+    if f_psi is not None:
+        pred_refl = f_psi(pred_mirror).clamp(0.0, 1.0)
+        m = reconstruction_metrics(pred_refl, s2_clean)
+        out["mae"]  = m["mae"].item()
+        out["sam"]  = m["sam"].item()
+        out["psnr"] = m["psnr"].item()
+        out["ssim"] = m["ssim"].item()
+
+    return out
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -504,6 +556,11 @@ def parse_args():
     p.add_argument("--icnn_layers",      type=int,   default=6)
     p.add_argument("--icnn_filters",     type=int,   default=64)
     p.add_argument("--strong_convexity", type=float, default=0.3)
+    # f_psi architecture — must match Phase 1 train_mirror_map.py defaults exactly
+    p.add_argument("--ngf",          type=int, default=64,
+                   help="Base feature maps for f_psi InverseMap")
+    p.add_argument("--n_res_blocks", type=int, default=6,
+                   help="ResNet blocks in f_psi InverseMap")
     # Denoiser network
     p.add_argument("--base_ch",   type=int, default=64,
                    help="U-Net base channel width (doubles each level)")
@@ -567,14 +624,16 @@ def main():
         )
 
     log_path = os.path.join(args.output_dir, "history.csv")
-    csv_fields = ["phase", "epoch", "step", "elapsed_s", "loss", "mae", "mse"]
+    csv_fields = ["phase", "epoch", "step", "elapsed_s", "loss",
+                  "mae_mirror", "mse_mirror", "mae", "sam", "psnr", "ssim"]
     if not os.path.exists(log_path):
         with open(log_path, "w", newline="") as f:
             csv.DictWriter(f, fieldnames=csv_fields).writeheader()
 
-    # ── Load frozen g_phi ────────────────────────────────────────────────────
-    print("Loading g_phi ...")
+    # ── Load frozen g_phi and f_psi ──────────────────────────────────────────
+    print("Loading g_phi and f_psi ...")
     g_phi = load_g_phi(args, device)
+    f_psi = load_f_psi(args, device)   # None if checkpoint lacks f_psi key
 
     # ── Dataset & loaders ────────────────────────────────────────────────────
     print("Loading dataset ...")
@@ -669,7 +728,8 @@ def main():
                     csv.DictWriter(f, fieldnames=csv_fields).writerow(dict(
                         phase="train", epoch=epoch, step=global_step,
                         elapsed_s=f"{elapsed:.1f}", loss=f"{mean_loss:.6f}",
-                        mae="", mse="",
+                        mae_mirror="", mse_mirror="",
+                        mae="", sam="", psnr="", ssim="",
                     ))
                 if args.wandb:
                     import wandb
@@ -678,7 +738,10 @@ def main():
         # ── Validation (run under EMA weights) ───────────────────────────────
         denoiser.eval()
         orig_weights = ema.apply(denoiser)
-        v_losses, v_maes, v_mses = [], [], []
+        v_losses = []
+        v_mae_mirror, v_mse_mirror = [], []
+        v_mae, v_sam, v_psnr, v_ssim = [], [], [], []
+
         with torch.no_grad():
             for s2_clean, s1s2 in val_loader:
                 s2_clean = s2_clean.to(device)
@@ -686,31 +749,52 @@ def main():
                 mirror_target = g_phi(s2_clean)
 
                 v_losses.append(
-                    edm_loss(denoiser, mirror_target, s1s2, args.P_mean, args.P_std).item()
+                    edm_loss(denoiser, mirror_target, s1s2,
+                             args.P_mean, args.P_std, args.s2_dropout).item()
                 )
-                m = val_metrics(denoiser, mirror_target, s1s2)
-                v_maes.append(m["mae"])
-                v_mses.append(m["mse"])
+                m = val_metrics(denoiser, mirror_target, s1s2, s2_clean, f_psi)
+                v_mae_mirror.append(m["mae_mirror"])
+                v_mse_mirror.append(m["mse_mirror"])
+                if m["mae"] is not None:
+                    v_mae.append(m["mae"])
+                    v_sam.append(m["sam"])
+                    v_psnr.append(m["psnr"])
+                    v_ssim.append(m["ssim"])
 
-        val_loss = float(np.mean(v_losses))
-        val_mae  = float(np.mean(v_maes))
-        val_mse  = float(np.mean(v_mses))
+        val_loss       = float(np.mean(v_losses))
+        val_mae_mirror = float(np.mean(v_mae_mirror))
+        val_mse_mirror = float(np.mean(v_mse_mirror))
+        val_mae  = float(np.mean(v_mae))  if v_mae  else float("nan")
+        val_sam  = float(np.mean(v_sam))  if v_sam  else float("nan")
+        val_psnr = float(np.mean(v_psnr)) if v_psnr else float("nan")
+        val_ssim = float(np.mean(v_ssim)) if v_ssim else float("nan")
         elapsed  = time.time() - t0
 
         print(
             f"Epoch {epoch:03d} | val_loss={val_loss:.4f}"
-            f"  mae={val_mae:.4f}  mse={val_mse:.6f}  elapsed={elapsed:.0f}s"
+            f"  mae={val_mae:.4f}  sam={val_sam:.4f}"
+            f"  psnr={val_psnr:.2f}  ssim={val_ssim:.4f}"
+            f"  elapsed={elapsed:.0f}s"
         )
         with open(log_path, "a", newline="") as f:
             csv.DictWriter(f, fieldnames=csv_fields).writerow(dict(
                 phase="val", epoch=epoch, step="",
                 elapsed_s=f"{elapsed:.1f}", loss=f"{val_loss:.6f}",
-                mae=f"{val_mae:.6f}", mse=f"{val_mse:.6f}",
+                mae_mirror=f"{val_mae_mirror:.6f}", mse_mirror=f"{val_mse_mirror:.6f}",
+                mae=f"{val_mae:.6f}", sam=f"{val_sam:.6f}",
+                psnr=f"{val_psnr:.4f}", ssim=f"{val_ssim:.6f}",
             ))
         if args.wandb:
             import wandb
-            wandb.log({"val/loss": val_loss, "val/mae": val_mae,
-                       "val/mse": val_mse, "epoch": epoch})
+            wandb.log({
+                "val/loss": val_loss,
+                "val/mae_mirror": val_mae_mirror,
+                "val/mae":  val_mae,
+                "val/sam":  val_sam,
+                "val/psnr": val_psnr,
+                "val/ssim": val_ssim,
+                "epoch": epoch,
+            })
 
         ema.restore(denoiser, orig_weights)
         denoiser.train()

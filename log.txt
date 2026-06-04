@@ -250,3 +250,24 @@ visual results at epoch 10 (98K dataset, mirror_edm_final2):
 - remaining issues: grainy texture (needs more epochs), heavy cloud cases still hard
 - expected to improve further toward epoch 50-100
 
+S2 dropout for heavy-cloud robustness (--s2_dropout 0.15):
+- added to edm_loss() in train_mirror_diffusion.py
+- per-sample: 15% chance of zeroing cloudy-S2 channels (ch2-14) while keeping SAR (ch0-1)
+- forces model to learn cloud removal from SAR alone on those steps
+- result: heavy-cloud outputs improved significantly; urban/terrain structure recovered well
+
+vegetation colour fix — cloud-weighted dropout:
+- problem: uniform 15% dropout also dropped S2 on clear-sky patches where S2 was accurate,
+  biasing the model against using S2 for vegetation spectral information (high-NIR/low-red
+  signature). result was vegetation appearing brownish/purplish instead of green.
+- fix: scale dropout rate by per-patch cloud coverage proxy (mean blue band brightness):
+    cloud_weight = (blue_band / 0.3).clamp(0.0, 1.0)
+    effective_rate = s2_dropout * cloud_weight
+  blue band (B02, ch2 of s1s2) is high for clouds (~0.5-0.8), low for clear sky (~0.05-0.15)
+- effect on effective dropout rate per patch type:
+    dense forest (clear): 2.6%  <- almost never dropped, spectral signal preserved
+    partial cloud:       12.4%  <- mostly dropped, SAR robustness active
+    heavy cloud:         15.0%  <- full dropout rate
+- clear-sky vegetation patches almost never lose S2 -> green spectral signature learned correctly
+- heavily cloudy patches still get full SAR-only training -> robustness preserved
+
