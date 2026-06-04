@@ -87,6 +87,7 @@ python "${PHASE2_DIR}/train_mirror_diffusion.py" \
     --batch_size        4               \
     --lr                1e-4            \
     --grad_clip         1.0             \
+    --s2_dropout        0.15            \
     --fp16                              \
     --num_workers       8               \
     --log_every         100             \

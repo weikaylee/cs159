@@ -206,3 +206,47 @@ resume training:
 - to resume: pass --resume <run-dir> to train_emrdm.sh (forwarded as -r flag to main.py)
   main.py finds last.ckpt automatically from the run directory
 
+# 6/3 train_mirror_diffusion.py — phase 2 standard EDM in mirror space
+
+switched from EMRDM residual bridge to standard (non-residual) EDM:
+- EMRDM residual bridge broken in mirror space: mean_key="S2" is cloudy in reflectance space
+  but target="target" is g_phi(clean) in mirror space -> bridge interpolates two different spaces,
+  model just learns to output near-zero (the compressed mirror range) and ignores conditioning
+- fix: standard EDM, no mean_key, starts from Gaussian noise, conditioned on S1S2
+- new script: phase2_emrdm/train_mirror_diffusion.py
+- uses g_phi on-the-fly (no pre-saved mirror images needed); pkl files from eval_emrdm.py
+
+mirror data stats (from check_mirror_range.py):
+- global range: [-0.174, 0.296], mean=0.003, std=0.033, no NaN/Inf
+- sigma_data=0.033 (set to match empirical std of mirror targets)
+- sigma_max=5.0 for inference (within training log-normal: exp(P_mean+2*P_std)=exp(2.4)~11)
+  original sigma_max=80 from EMRDM paper (for data std~0.5) caused pure noise output
+
+dataset fix — 12K -> 98K training samples:
+- old pkl files were generated from only a subset of data (spring only, ~17K triplets total)
+- diagnose_dataset.py confirmed all 4 seasons have 100% regex match: 122,218 matched triplets
+- fix: regenerate pkl files with build_triplets()+write_pkl_files() on all seasons
+- train: ~98K, val: ~12K, test: ~12K
+
+training improvements added:
+- AdamW weight_decay=1e-4 (was Adam, no weight decay -> overfit at epoch 28 on 12K data)
+- CosineAnnealingLR from lr=1e-4 to lr/10 over epochs (prevents late-training oscillation)
+- EMA decay=0.999 (shadow weights for inference; validation runs under EMA weights;
+  checkpoint saves both raw and EMA state under "ema" key)
+- run_mirror_diffusion.py loads EMA weights automatically if present in checkpoint
+
+NaN loss during training (mirror_edm_final2, ep019 step 07800):
+- same root cause as EMRDM NaN: rare tail sigma from log-N(P_mean=-1.2, P_std=1.2)
+  e.g. sigma~0.001 -> EDM weight = (sigma^2+sd^2)/(sigma*sd)^2 ~ 160K with sd=0.033
+- GradScaler skips the NaN step automatically so training may recover
+- if NaN becomes permanent, apply these two fixes in edm_loss() in train_mirror_diffusion.py:
+    weight = weight.clamp(max=1.0 / sd**2)   # cap at ~918 for sd=0.033
+  and in the training loop after loss.backward():
+    if not loss.isfinite(): optimizer.zero_grad(); scaler.update(); continue
+
+visual results at epoch 10 (98K dataset, mirror_edm_final2):
+- major improvement over 12K runs: real cloud removal happening, natural colours,
+  rivers/coastlines/urban grids visible, no blue cast
+- remaining issues: grainy texture (needs more epochs), heavy cloud cases still hard
+- expected to improve further toward epoch 50-100
+
