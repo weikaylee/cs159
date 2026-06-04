@@ -2,13 +2,13 @@
 
 #SBATCH --nodes=1
 #SBATCH --ntasks=5
-#SBATCH --gres=gpu:1
+#SBATCH --gres=gpu:nvidia_h200:1
 #SBATCH --mem=64G
 #SBATCH --partition=gpu
 
 #SBATCH --time=12:00:00   # eval is shorter than training; adjust if needed
 
-#SBATCH -J "mirror-edm-eval"
+#SBATCH -J "mirror-edm-eval-m1"
 #SBATCH --mail-user=oywang@caltech.edu
 #SBATCH --mail-type=BEGIN
 #SBATCH --mail-type=END
@@ -25,8 +25,8 @@ conda activate emrdm    # re-use the EMRDM env: torch, rasterio, torchvision
 DATA_ROOT="/resnick/groups/perona/oywang/cs159/data"
 CODE_DIR="/resnick/groups/perona/oywang/cs159/phase2_emrdm"
 NAMM_CKPT="/resnick/groups/perona/oywang/cs159/runs/stage3_top/spectral_sw0.1_mw1/best.pt"
-EDM_CKPT="/resnick/groups/perona/oywang/cs159/runs/mirror_edm_final_dropout/best.pt"
-OUTPUT_DIR="/resnick/groups/perona/oywang/cs159/output/mirror_diffusion_eval_dropout"
+EDM_CKPT="/resnick/groups/perona/oywang/cs159/runs/mirror_edm_final/best.pt"
+OUTPUT_DIR="/resnick/groups/perona/oywang/cs159/output/mirror_diffusion_eval_final"
 
 mkdir -p "$OUTPUT_DIR"
 

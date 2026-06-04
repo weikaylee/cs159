@@ -8,7 +8,7 @@
 
 #SBATCH --time=12:00:00   # eval is shorter than training; adjust if needed
 
-#SBATCH -J "mirror-edm-eval"
+#SBATCH -J "mirror-edm-eval-ema"
 #SBATCH --mail-user=oywang@caltech.edu
 #SBATCH --mail-type=BEGIN
 #SBATCH --mail-type=END
