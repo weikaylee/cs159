@@ -2,7 +2,7 @@
 
 #SBATCH --nodes=1
 #SBATCH --ntasks=5
-#SBATCH --gres=gpu:nvidia_h200:1
+#SBATCH --gres=gpu:1
 #SBATCH --mem=64G
 #SBATCH --partition=gpu
 
