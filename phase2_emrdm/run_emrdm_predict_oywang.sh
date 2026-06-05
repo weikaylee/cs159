@@ -18,10 +18,10 @@
 
 set -euo pipefail
 
-REPO_ROOT="/resnick/groups/CS156b/from_central/2026/SSSClassCSNerds/cs159"
+REPO_ROOT="/resnick/groups/perona/oywang/cs159"
 DATA_ROOT="${REPO_ROOT}/data"
-CKPT_PATH="${REPO_ROOT}/last.ckpt"
-OUTPUT_DIR="/resnick/groups/CS156b/from_central/2026/SSSClassCSNerds/cs159/data/emrdm"
+CKPT_PATH="${REPO_ROOT}/emrdm_weights/train/sentinel/checkpoints/last.ckpt"
+OUTPUT_DIR="/resnick/groups/perona/oywang/cs159/data/emrdm"
 CODE_DIR="${REPO_ROOT}/phase2_emrdm"
 
 echo "===== Job info ====="
@@ -33,7 +33,7 @@ echo "  Start:      $(date)"
 echo "===================="
 
 source "$(conda info --base)/etc/profile.d/conda.sh"
-conda activate emrdm
+conda activate emrdm_test
 
 mkdir -p "${OUTPUT_DIR}" "${CODE_DIR}/logs"
 
