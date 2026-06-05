@@ -27,7 +27,7 @@ DATA_ROOT="/resnick/groups/perona/oywang/cs159/data"
 CODE_DIR="/resnick/groups/perona/oywang/cs159/phase2_emrdm"
 NAMM_CKPT="/resnick/groups/perona/oywang/cs159/runs/stage3_top/spectral_sw0.1_mw1/best.pt"
 EDM_CKPT="/resnick/groups/perona/oywang/cs159/runs/mirror_edm_final_dropout/best.pt"
-OUTPUT_DIR="/resnick/groups/perona/oywang/cs159/output/mirror_diffusion_eval_dropout"
+OUTPUT_DIR="/resnick/groups/perona/oywang/cs159/output/mirror_diffusion_eval_dropout_80steps"
 
 mkdir -p "$OUTPUT_DIR"
 
@@ -45,7 +45,7 @@ python "$CODE_DIR/run_mirror_diffusion.py" \
     --emb_dim      256 \
     --sigma_data   0.033 \
     --sampler      heun \
-    --steps        40 \
+    --steps        80 \
     --sigma_min    0.002 \
     --sigma_max    5.0 \
     --rho          7.0 \
@@ -70,4 +70,5 @@ python "$CODE_DIR/visualize_mirror_diffusion.py" \
 
 
 # --max_samples   12 \
+# --steps 80 \ double Heun denoising steps so that there is more resolution in low sigma regime
 
