@@ -16,7 +16,9 @@ On SLURM, submit via the accompanying train_mirror_map.slurm script.
 
 import argparse
 import csv
+import math
 import os
+import sys
 import time
 
 import torch
@@ -262,6 +264,7 @@ def main():
                       'mae', 'sam', 'psnr', 'ssim')
         train_totals = {k: 0.0 for k in train_keys}
         train_n = 0
+        nan_skip_count = 0
 
         for step, batch in enumerate(train_loader):
             if isinstance(batch, (tuple, list)):
@@ -292,6 +295,21 @@ def main():
                     l_emrdm = constraint_loss(x_recon_emrdm, x)
                     losses['loss'] = losses['loss'] + args.emrdm_loss_weight * l_emrdm
                     losses['l_emrdm'] = l_emrdm.detach()
+
+            if not math.isfinite(losses['loss'].item()):
+                nan_terms = {
+                    k: f"{losses[k].item():.4g}"
+                    for k in ('l_cycle', 'l_constr', 'l_reg')
+                    if k in losses
+                }
+                print(
+                    f"[SKIP] NaN/Inf at Ep {epoch+1} step {step} | "
+                    f"loss={losses['loss'].item()} | terms={nan_terms} | "
+                    f"sam_weight={args.sam_weight} moment_weight={args.moment_weight}",
+                    flush=True,
+                )
+                nan_skip_count += 1
+                continue
 
             scaler.scale(losses['loss']).backward()
             scaler.unscale_(opt_g)
@@ -332,6 +350,8 @@ def main():
                 print(msg)
 
         # ── Train epoch metrics ─────────────────────────────────────────────
+        if nan_skip_count:
+            print(f"  [WARN] Epoch {epoch+1}: skipped {nan_skip_count} NaN/Inf batch(es)")
         train_den = max(train_n, 1)
         train_avg = {k: v / train_den for k, v in train_totals.items()}
 

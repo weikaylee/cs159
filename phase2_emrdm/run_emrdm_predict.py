@@ -169,11 +169,20 @@ def patch_sentinel_yaml(data_root, ckpt_path):
 
     cfg.model.params.ckpt_path = ckpt_path
 
-    # predict uses all_predict_paths.pkl (split="predict") on a single GPU
-    cfg.data.params.predict.params.root = data_root
+    # patch all split roots so PL doesn't look for pkl files at a stale path
+    for split in ("train", "validation", "test", "predict"):
+        if split in cfg.data.params:
+            cfg.data.params[split].params.root = data_root
+
     cfg.data.params.predict.params.split = "predict"
 
     cfg.lightning.trainer.devices = 1
+
+    # Override DDPStrategy (main.py's default) with single-device to avoid NCCL on 1 GPU
+    cfg.lightning.strategy = OmegaConf.create({
+        "target": "pytorch_lightning.strategies.SingleDeviceStrategy",
+        "params": {"device": "cuda:0"},
+    })
 
     OmegaConf.save(cfg, SENTINEL_YAML)
     print(f"  Patched in-place: {SENTINEL_YAML}")

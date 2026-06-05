@@ -381,7 +381,8 @@ def spectral_angle_mapper(x_hat: torch.Tensor,
     dot = (x_hat * x_ref).sum(dim=1)
     nx = x_hat.norm(dim=1).clamp(min=eps)
     ny = x_ref.norm(dim=1).clamp(min=eps)
-    cos = (dot / (nx * ny)).clamp(-1.0, 1.0)
+    # Clamp strictly inside (-1, 1) to keep d(acos)/dx finite.
+    cos = (dot / (nx * ny)).clamp(-1.0 + 1e-6, 1.0 - 1e-6)
     return torch.acos(cos).mean()
 
 

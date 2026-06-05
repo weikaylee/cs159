@@ -156,14 +156,7 @@ i think the readme in phase 2 should be updated but basically prepare_mirror_dat
 and then u can train emrdm in mirror space using python main.py --base configs/example_training/sentinel_mirror.yaml (??)
 
 - cleaned up branches xD 
-
-TODO:
-- check prepare_mirror_dataset.py
-- create script for prepping dataset
-- create script for actual trianing of emrdm (can adapt curr stuff?)
-- review chris fedback.....
-
-- use pt file in da drive!
+- create scripts to run prepare_mirror_dataset.py and train_emrdm.py (which calls main.py) on hpc
 
 # 6/2 phase 2 emrdm mirror space training
 
