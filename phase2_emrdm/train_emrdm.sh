@@ -17,7 +17,7 @@
 #SBATCH --cpus-per-task=16
 #SBATCH --gres=gpu:2
 #SBATCH --mem=128G
-#SBATCH --time=48:00:00
+#SBATCH --time=72:00:00
 #SBATCH --partition=gpu
 #SBATCH --constraint=epyc
 #SBATCH --output=/resnick/groups/perona/oywang/cs159/logs/slurm-emrdm-train-%j.out
@@ -37,7 +37,7 @@ mkdir -p "${LOG_DIR}"
 # ── Environment ───────────────────────────────────────────────────────────────
 # NOTE: use this one olivia! (delete the line below) i think; uses ur conda path
 # source /home/kwei2/miniforge3/etc/profile.d/conda.sh
-conda activate emrdm
+conda activate emrdm_test
 
 # ── Training ──────────────────────────────────────────────────────────────────
 cd "${CODE_DIR}"
@@ -46,6 +46,7 @@ python train_emrdm.py \
     --devices    2 \
     --max_epochs 5 \
     --wandb \
-    --logdir     "${LOG_DIR}/emrdm_train"
+    --logdir     "${LOG_DIR}/emrdm_train" \
+    --resume     "${LOG_DIR}/emrdm_train/2026-06-01T11-21-43_example_training-sentinel_mirror_train_scratch/checkpoints/last.ckpt"
 
 echo "===== Finished: $(date) ====="

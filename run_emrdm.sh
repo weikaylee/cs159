@@ -1,6 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=emrdm_infer
 #SBATCH --partition=gpu
+#SBATCH --exclusive
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32G
@@ -9,6 +10,7 @@
 #SBATCH --error=/resnick/groups/perona/oywang/cs159/logs/emrdm_infer.%j.err
 #SBATCH --mail-type=BEGIN,END,FAIL
 #SBATCH --mail-user=oywang@caltech.edu
+#SBATCH --exclude=hpc-93-36
 
 set -euo pipefail
 

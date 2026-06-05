@@ -262,7 +262,8 @@ def l_moments(x_hat: torch.Tensor,
               x_ref: torch.Tensor,
               eps: float = 1e-6) -> torch.Tensor:
     """Per-band mean + std matching across batch and spatial dims."""
-    # Cast to float32: std() over large spatial dims can overflow fp16.
+    # Cast to float32: fp16 variance accumulation over B*H*W ~1M elements
+    # can overflow, and eps=1e-6 is subnormal in fp16 (min normal ~6.1e-5).
     x_hat = x_hat.float()
     x_ref = x_ref.float()
     mean_hat = x_hat.mean(dim=(0, 2, 3))
@@ -323,11 +324,17 @@ class ConstraintLoss(nn.Module):
             dis = torch.zeros((), device=x_hat.device)
             style = torch.zeros((), device=x_hat.device)
         else:
-            feats_hat = self.vgg(x_hat)
-            feats_ref = self.vgg(x_ref)
-            dis = l_dis(feats_hat['content'], feats_ref['content'])
-            style = l_style(feats_hat['style'], feats_ref['style'],
-                    weights=self.vgg.style_weights)
+            # Disable autocast for the entire VGG path: torch.bmm (Gram matrix)
+            # and conv2d are autocast-eligible and would run in fp16, causing
+            # Gram entries O(H*W * a²) >> fp16 max (65504) to overflow → NaN.
+            # The explicit .float() on VGG input is not sufficient — autocast
+            # overrides it for eligible ops.
+            with torch.cuda.amp.autocast(enabled=False):
+                feats_hat = self.vgg(x_hat.float())
+                feats_ref = self.vgg(x_ref.float())
+                dis = l_dis(feats_hat['content'], feats_ref['content'])
+                style = l_style(feats_hat['style'], feats_ref['style'],
+                        weights=self.vgg.style_weights)
 
         sam = l_sam(x_hat, x_ref)
         moments = l_moments(x_hat, x_ref)
@@ -367,8 +374,8 @@ def spectral_angle_mapper(x_hat: torch.Tensor,
         Scalar tensor: mean of arccos of per-pixel cosine similarity
         along the channel axis. Lower = more spectrally consistent.
     """
-    # Cast to float32: acos gradient = 1/sqrt(1-cos²) diverges near ±1 in fp16,
-    # and torch.acos is not autocast-promoted, so fp16 inputs produce NaN grads.
+    # Cast to float32: fp16 min subnormal (~5.96e-8) is larger than eps=1e-8,
+    # so clamp(min=eps) is a no-op in fp16 and zero-norm pixels produce 0/0.
     x_hat = x_hat.float()
     x_ref = x_ref.float()
     dot = (x_hat * x_ref).sum(dim=1)
