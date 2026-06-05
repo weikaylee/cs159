@@ -13,8 +13,8 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64G
 #SBATCH --time=4:00:00
-#SBATCH --output=cs159/logs/phase2-emrdm_kwei_%j.out
-#SBATCH --error=cs159/logs/phase2-emrdm_kwei_%j.err
+#SBATCH --output=/resnick/groups/perona/oywang/cs159/logs/phase2-emrdm_kwei_%j.out
+#SBATCH --error=/resnick/groups/perona/oywang/cs159/logs/phase2-emrdm_kwei_%j.err
 
 set -euo pipefail
 
