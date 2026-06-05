@@ -264,3 +264,41 @@ vegetation colour fix — cloud-weighted dropout:
 - clear-sky vegetation patches almost never lose S2 -> green spectral signature learned correctly
 - heavily cloudy patches still get full SAR-only training -> robustness preserved
 
+# FUTURE WORK — border sharpness and color accuracy
+
+## Border sharpening between vegetation types
+problem: EDM loss is MSE-based -> "regression to the mean" -> soft/blurry boundaries between
+vegetation classes (fields, forest edges, water margins) even after 100 epochs
+
+fix 1 — more denoising steps (inference only, no retraining):
+- increase --num_steps from 40 -> 80-100 in run_mirror_diffusion.sh
+- more Heun steps resolve finer spatial detail at low sigma
+
+fix 2 — classifier-free guidance (CFG) at inference (no retraining required):
+- model is already conditioned on S1S2, so CFG can amplify that signal:
+    D_guided = D(y, σ, S1S2) + w * (D(y, σ, S1S2) - D(y, σ, zeros))  w ≈ 1.5-3.0
+- second forward pass per step with zeroed conditioning; guidance weight w trades
+  sharpness vs. diversity (higher w = sharper but less varied outputs)
+- sharpens both spatial edges and spectral contrast without retraining
+
+## Color mismatch (desaturated / hue-shifted vegetation)
+problem: training loss is MSE in mirror space only; no direct spectral angle penalty in
+reflectance space. f_psi was also trained on g_phi(real_s2) inputs, not EDM-generated
+mirror samples -> band-specific bias when inverting EDM outputs back to reflectance.
+
+fix 1 — add SAM loss in reflectance space during training:
+- f_psi(y_pred) already computed in val loop; move into training loss:
+    y_refl = f_psi(y_pred)    # predicted reflectance
+    x_refl = f_psi(y)         # ground truth reflectance (from mirror target)
+    sam_loss = spectral_angle(y_refl, x_refl).mean()
+    loss = edm_loss + lambda_sam * sam_loss    # lambda_sam ~ 0.1
+- directly penalizes spectral angle error; expected to improve SAM metric and fix
+  hue shifts in vegetation without changing model architecture
+
+fix 2 — Phase 3: fine-tune f_psi on EDM-generated mirror samples (most impactful):
+- current f_psi was trained with g_phi(real_s2) as input (Phase 1 cycle loss)
+- at inference, f_psi receives EDM-generated mirror samples which have a different
+  distribution -> systematic color bias is the distribution shift
+- Phase 3: freeze g_phi + denoiser; fine-tune f_psi on (edm_output -> real_s2) pairs
+- this is the planned Phase 3 in the NAMM pipeline and would be the principled fix
+
