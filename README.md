@@ -1,6 +1,6 @@
 # Spectrally Consistent Cloud Removal via Neural Approximate Mirror Maps
 
-This repository integrates the [EDM] diffusion model with [Neural Approximate Mirror Maps (NAMMs)](https://github.com/berthyf96/namm) to enforce spectral consistency constraints during the generative process. The approach is evaluated on the [SEN12MS-CR](https://patricktum.github.io/cloud_removal/sen12mscr/) benchmark.
+This repository integrates the [EDM](https://doi.org/10.48550/arXiv.2206.00364) diffusion model with [Neural Approximate Mirror Maps (NAMMs)](https://github.com/berthyf96/namm) to enforce spectral consistency constraints during the generative process. The approach is evaluated on the [SEN12MS-CR](https://patricktum.github.io/cloud_removal/sen12mscr/) benchmark.
 
 ## Background
 
