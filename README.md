@@ -158,8 +158,8 @@ Trains EDM on mirror-space targets produced by `g_phi`. Uses the EDM entrypoint 
 cd phase2_emrdm
 python train_mirror_diffusion.py \
     --data_root /scratch/$USER/cs159 \
-    --namm_ckpt /resnick/groups/perona/oywang/cs159/runs/stage3_top/spectral_sw0.1_mw1/best.pt \
-    --output_dir /scratch/$USER/cs159/checkpoints/phase1 \
+    --namm_ckpt /resnick/groups/perona/$USER/cs159/runs/stage3_top/spectral_sw0.1_mw1/best.pt \
+    --output_dir /resnick/groups/perona/$USER/cs159/runs/phase2 \
 ```
 
 Evaluate the EDM on the test dataset.
@@ -167,10 +167,10 @@ Evaluate the EDM on the test dataset.
 ```bash
 cd phase2_emrdm
 python run_mirror_diffusion.py \
-    --data_root /resnick/groups/perona/oywang/cs159/data \
-    --namm_ckpt /resnick/.../runs/stage3_top/spectral_sw0.1_mw1/best.pt \
-    --edm_ckpt  /resnick/.../runs/mirror_edm/best.pt \
-    --output_dir /resnick/.../output/mirror_diffusion \
+    --data_root  /resnick/groups/perona/$USER/cs159/data \
+    --namm_ckpt  /resnick/groups/perona/$USER/cs159/runs/stage3_top/spectral_sw0.1_mw1/best.pt \
+    --edm_ckpt   /resnick/groups/perona/$USER/cs159/runs/phase2/best.pt \
+    --output_dir /resnick/groups/perona/$USER/cs159/output/mirror_diffusion \
     --split test --sampler heun --steps 40 --fp16
 ```
 
@@ -179,8 +179,8 @@ Visualizing the generated cloud-free samples from the test dataset.
 ```bash
 cd phase2_emrdm
 python phase2_emrdm/visualize_predictions.py \\
-    --output_dir  /resnick/.../output/mirror_diffusion \\
-    --data_root   /resnick/.../data \\
+    --output_dir  /resnick/groups/perona/$USER/cs159/output/mirror_diffusion \\
+    --data_root   /resnick/groups/perona/$USER/cs159/data \\
     --split       test \\
     --n_samples   12 \\
     --out_png     predictions_grid.png
@@ -201,10 +201,10 @@ the two models perform.
 
 Evaluated on the SEN12MS-CR benchmark using:
 
-- **MAE** (mean absolute error) — diff between predicted and ground truth
-- **SAM** (spectral angle mapper) — spectral consistency
-- **PSNR** — pixel-wise reconstruction quality
-- **SSIM** (structural similarity index) — visual and spatial similarity
+- **MAE** &darr; (mean absolute error) — diff between predicted and ground truth
+- **SAM** &darr; (spectral angle mapper) — spectral consistency
+- **PSNR** &uarr; — pixel-wise reconstruction quality
+- **SSIM** &uarr; (structural similarity index) — visual and spatial similarity
 
 Results are directly comparable to published EMRDM and other SEN12MS-CR baselines.
 
