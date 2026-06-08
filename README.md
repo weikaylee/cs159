@@ -132,10 +132,10 @@ python train_mirror_map.py \
     --output_dir /scratch/$USER/cs159/checkpoints/phase1 \
     --resume /scratch/$USER/cs159/checkpoints/phase1/ckpt_ep0050.pt
 ```
-We trained a sweep for 3 epochs, then we chose 3 configs. 
-CONFIG1="spectral_sw0.1_mw1"
-CONFIG2="spectral_sw1_mw10"
-CONFIG3="spectral_sw10_mw10"
+We trained a sweep for 3 epochs, then we chose to train 3 configs for 100 epochs. 
+- CONFIG1="spectral_sw0.1_mw1"
+- CONFIG2="spectral_sw1_mw10"
+- CONFIG3="spectral_sw10_mw10"
 
 Key hyperparameters:
 
@@ -232,6 +232,15 @@ Results are directly comparable to published EMRDM and other SEN12MS-CR baseline
   author={Yu, Zhenyu and Idris, Mohd Yamani Inda and Wang, Pei},
   journal={arXiv:2504.12112},
   year={2025}
+}
+
+@inproceedings{karras2022elucidating,
+  title={Elucidating the Design Space of Diffusion-Based Generative Models},
+  author={Karras, Tero and Aittala, Miika and Aila, Timo and Laine, Samuli},
+  booktitle={Advances in Neural Information Processing Systems},
+  year={2022},
+  eprint={2206.00364},
+  archivePrefix={arXiv},
 }
 
 @article{ebel2020multisensor,
