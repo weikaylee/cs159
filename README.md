@@ -1,22 +1,22 @@
 # Spectrally Consistent Cloud Removal via Neural Approximate Mirror Maps
 
-This repository integrates the [EMRDM](https://github.com/Ly403/EMRDM) cloud removal diffusion model with [Neural Approximate Mirror Maps (NAMMs)](https://github.com/berthyf96/namm) to enforce spectral consistency constraints during the generative process. The approach is evaluated on the [SEN12MS-CR](https://patricktum.github.io/cloud_removal/sen12mscr/) benchmark.
+This repository integrates the [EDM] diffusion model with [Neural Approximate Mirror Maps (NAMMs)](https://github.com/berthyf96/namm) to enforce spectral consistency constraints during the generative process. The approach is evaluated on the [SEN12MS-CR](https://patricktum.github.io/cloud_removal/sen12mscr/) benchmark.
 
 ## Background
 
-Diffusion-based cloud removal models can produce visually coherent reconstructions but often violate spectral consistency — the requirement that individual Sentinel-2 bands retain their physically meaningful inter-band correlations. This project addresses that limitation by:
+We investigate whether combining the NAMM and EDM frameworks improves cloud removal performance on the SEN12MS-CR dataset. Specifically, we ask: can a learned constrained diffusion model better preserve the spectral properties of multispectral satellite imagery compared to an unconstrained baseline?
 
-1. Learning a mirror map that transforms cloud-free multispectral images into an unconstrained space where a diffusion model can operate freely.
-2. Training EMRDM in that unconstrained mirror space.
-3. Projecting samples back to the constrained (spectrally consistent) space via the learned inverse map.
+This project addresses that question by:
 
-The constraint distance function is defined as:
+1. Learning a mirror map `g_phi` that transforms cloud-free multispectral images into an unconstrained space where a diffusion model can operate freely.
+2. Training a standard EDM (Karras et al. 2022) in that unconstrained mirror space, conditioned on SAR + cloudy Sentinel-2.
+3. Projecting samples back to the constrained (spectrally consistent) space via the learned inverse map `f_psi`.
 
-```
-l_constr = L_recon + L_dis + 100 * L_style
-```
+We define a differentiable constraint distance function as a combination of three complementary terms operating at different levels of spectral and spatial fidelity:
 
-where `L_recon` is pixel-wise MSE, `L_dis` is an RKHS distribution loss over VGG feature maps, and `L_style` is a Gram-matrix style loss — following Yu et al. (SatelliteMaker).
+$$\ell_{\text{constr}}(\hat{\mathbf{x}}, \mathbf{x}) = \mathcal{L}_{\text{recon}}(\hat{\mathbf{x}}, \mathbf{x}) + \lambda_{\text{SAM}}\,\mathcal{L}_{\text{SAM}}(\hat{\mathbf{x}}, \mathbf{x}) + \lambda_{\text{mom}}\,\mathcal{L}_{\text{moments}}(\hat{\mathbf{x}}, \mathbf{x})$$
+
+where $\hat{\mathbf{x}} = f_\psi(\mathbf{g}_\phi(\mathbf{x}) + \sigma\mathbf{z})$ is the image recovered by the inverse map from a noisy mirror-space point, and $\mathbf{x}$ is the cloud-free reference. The three terms enforce local spatial fidelity (`L_recon`, pixel-wise MSE), spectral shape consistency (`L_SAM`, spectral angle mapper loss), and global reflectance statistics (`L_moments`, per-band mean and variance), encouraging images that are physically consistent with Sentinel-2 observations. NAMM's construction provides a guarantee that final samples satisfy the constraint set.
 
 ## Repository structure
 
@@ -24,7 +24,9 @@ where `L_recon` is pixel-wise MSE, `L_dis` is an RKHS distribution loss over VGG
 .
 ├── README.md
 ├── CLAUDE.md
-├── download_ROIs1158_spring.sh       # Download script for the starter dataset
+├── data
+|   ├── download_all_data.py          # Download all SEN12MSCR data
+|   ├── download_ROIs1158_spring.sh   # Download script for the starter dataset
 ├── phase1_mirror_map/                # Phase 1: train NAMM mirror maps
 │   ├── icnn.py                       # Input-convex NN: forward mirror map g_phi
 │   ├── inverse_map.py                # ResNet decoder: inverse mirror map f_psi
@@ -32,7 +34,19 @@ where `L_recon` is pixel-wise MSE, `L_dis` is an RKHS distribution loss over VGG
 │   ├── dataset.py                    # SEN12MS-CR cloud-free dataloader
 │   ├── train_mirror_map.py           # Phase 1 training script
 │   └── train_mirror_map.slurm        # SLURM job submission script
-├── phase2_emrdm/                     # Phase 2: train EMRDM in mirror space (forthcoming)
+├── phase2_emrdm/                     # Phase 2: train EDM in mirror space
+│   ├── train_mirror_diffusion.py     # Main Phase 2 training script (standard EDM, conditioned on S1S2)
+│   ├── train_mirror_diffusion.sh     # SLURM job submission for Phase 2 training
+│   ├── run_mirror_diffusion.py       # Inference: denoise in mirror space, invert via f_psi
+│   ├── run_mirror_diffusion_ema.sh   # SLURM eval script (uses EMA checkpoint)
+│   ├── eval_emrdm.py                 # Builds all_{train,val,test}_paths.pkl split files
+│   ├── prepare_mirror_dataset.py     # Applies g_phi to write mirror-space TIFs (optional pre-compute)
+│   ├── prepare_mirror_dataset.sh     # SLURM script for above
+│   ├── visualize_predictions.py      # Side-by-side PNG: [Cloudy | Predicted | GT]
+│   ├── check_mirror_range.py         # Scans mirror data range to calibrate sigma_data
+│   ├── diagnose_dataset.py           # Verifies pkl triplet counts across seasons
+│   ├── train_raw_diffusion.py        # Baseline EDM without mirror space (for comparison)
+│   └── sgm/                          # EMRDM model library (upstream, minimally modified)
 ├── phase3_finetune/                  # Phase 3: finetune inverse map (forthcoming)
 ├── utils/                            # shared code (empty for now)
 ├── tests/
@@ -41,7 +55,9 @@ where `L_recon` is pixel-wise MSE, `L_dis` is an RKHS distribution loss over VGG
 └── dump/                             # parked/exploratory code outside the documented pipeline
 ```
 
-Phase 2 (EMRDM training in mirror space) and Phase 3 (inverse map finetuning) scripts are forthcoming.
+Phase 2 (EDM training in mirror space) 
+
+Phase 3 (inverse map finetuning) scripts are forthcoming.
 
 ## Setup
 
