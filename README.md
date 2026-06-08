@@ -174,8 +174,8 @@ Trains EDM on mirror-space targets produced by `g_phi`. Uses the EDM entrypoint 
 cd phase2_emrdm
 python train_mirror_diffusion.py \
     --data_root /scratch/$USER/cs159 \
-    --namm_ckpt /resnick/groups/perona/$USER/cs159/runs/stage3_top/spectral_sw0.1_mw1/best.pt \
-    --output_dir /resnick/groups/perona/$USER/cs159/runs/phase2 \
+    --namm_ckpt /resnick/groups/.../$USER/cs159/runs/stage3_top/spectral_sw0.1_mw1/best.pt \
+    --output_dir /resnick/groups/.../$USER/cs159/runs/phase2 \
 ```
 
 Evaluate the EDM on the test dataset.
@@ -183,10 +183,10 @@ Evaluate the EDM on the test dataset.
 ```bash
 cd phase2_emrdm
 python run_mirror_diffusion.py \
-    --data_root  /resnick/groups/perona/$USER/cs159/data \
-    --namm_ckpt  /resnick/groups/perona/$USER/cs159/runs/stage3_top/spectral_sw0.1_mw1/best.pt \
-    --edm_ckpt   /resnick/groups/perona/$USER/cs159/runs/phase2/best.pt \
-    --output_dir /resnick/groups/perona/$USER/cs159/output/mirror_diffusion \
+    --data_root  /resnick/groups/.../$USER/cs159/data \
+    --namm_ckpt  /resnick/groups/.../$USER/cs159/runs/stage3_top/spectral_sw0.1_mw1/best.pt \
+    --edm_ckpt   /resnick/groups/.../$USER/cs159/runs/phase2/best.pt \
+    --output_dir /resnick/groups/.../$USER/cs159/output/mirror_diffusion \
     --split test --sampler heun --steps 40 --fp16
 ```
 
@@ -195,8 +195,8 @@ Visualizing the generated cloud-free samples from the test dataset.
 ```bash
 cd phase2_emrdm
 python phase2_emrdm/visualize_predictions.py \\
-    --output_dir  /resnick/groups/perona/$USER/cs159/output/mirror_diffusion \\
-    --data_root   /resnick/groups/perona/$USER/cs159/data \\
+    --output_dir  /resnick/groups/.../$USER/cs159/output/mirror_diffusion \\
+    --data_root   /resnick/groups/.../$USER/cs159/data \\
     --split       test \\
     --n_samples   12 \\
     --out_png     predictions_grid.png
