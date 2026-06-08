@@ -85,6 +85,7 @@ pip install wandb omegaconf rasterio tifffile scipy opencv-python lpips
 
 **Full dataset (cluster / training run, ~30 GB):**
 ```bash
+cd data
 chmod +x download_ROIs1158_spring.sh
 ./download_ROIs1158_spring.sh /scratch/$USER/cs159
 ```
@@ -93,8 +94,8 @@ This downloads ~30 GB (compressed) for the spring ROI: cloudy Sentinel-2, cloud-
 
 **Local subset (laptop dev / tests, ~1.5 GB):**
 ```bash
-python download_local_data.py                        # 10 patches x 3 scenes
-PER_SCENE=10 N_SCENES=5 python download_local_data.py # smaller / custom subset
+python data/download_local_data.py                        # 10 patches x 3 scenes
+PER_SCENE=10 N_SCENES=5 python data/download_local_data.py # smaller / custom subset
 ```
 
 Streams all three Phase-1/2 archives (cloud-free `_s2`, SAR `_s1`, cloudy `_s2_cloudy`) from `wget` FTP through Python's `tarfile`, extracting members one at a time so the multi-GB tarballs never land on disk. The anchor pass takes `PER_SCENE` patches from each of `N_SCENES` distinct scenes of the cloud-free archive (default 20 × 10 = 200), giving a scene-diverse subset; s1 and s2_cloudy are then filtered to those same patch IDs (`<scene>_p<N>`), and a reconciliation pass keeps only patches present in all three. Final disk footprint is ~1.5 GB (just the extracted patches). The integration smoke test under `tests/integration/` consumes the cloud-free subset and is skipped when it isn't present.
@@ -121,7 +122,7 @@ python train_mirror_map.py \
 **SLURM cluster:**
 ```bash
 # Edit the partition name and paths in the .slurm file first
-sbatch phase1_mirror_map/train_mirror_map.slurm
+sbatch phase1_mirror_map/stage2_coarse_sweep
 ```
 
 **Resume from checkpoint:**
@@ -131,6 +132,10 @@ python train_mirror_map.py \
     --output_dir /scratch/$USER/cs159/checkpoints/phase1 \
     --resume /scratch/$USER/cs159/checkpoints/phase1/ckpt_ep0050.pt
 ```
+We trained a sweep for 3 epochs, then we chose 3 configs. 
+CONFIG1="spectral_sw0.1_mw1"
+CONFIG2="spectral_sw1_mw10"
+CONFIG3="spectral_sw10_mw10"
 
 Key hyperparameters:
 
@@ -145,20 +150,61 @@ Key hyperparameters:
 
 Checkpoints are saved to `--output_dir` every 10 epochs and whenever validation loss improves (`best.pt`).
 
-### Phase 2 — Train EMRDM in mirror space (forthcoming)
+### Phase 2 — Train EDM in mirror space
 
-Trains EMRDM on mirror-space targets produced by `g_phi`. Uses the EMRDM `main.py` entrypoint with a modified config that points to the mirror dataset and loads the Phase 1 checkpoint.
+Trains EDM on mirror-space targets produced by `g_phi`. Uses the EDM entrypoint with a modified config that points to the mirror dataset and loads the Phase 1 checkpoint.
+
+```bash
+cd phase2_emrdm
+python train_mirror_diffusion.py \
+    --data_root /scratch/$USER/cs159 \
+    --namm_ckpt /resnick/groups/perona/oywang/cs159/runs/stage3_top/spectral_sw0.1_mw1/best.pt \
+    --output_dir /scratch/$USER/cs159/checkpoints/phase1 \
+```
+
+Evaluate the EDM on the test dataset.
+
+```bash
+cd phase2_emrdm
+python run_mirror_diffusion.py \
+    --data_root /resnick/groups/perona/oywang/cs159/data \
+    --namm_ckpt /resnick/.../runs/stage3_top/spectral_sw0.1_mw1/best.pt \
+    --edm_ckpt  /resnick/.../runs/mirror_edm/best.pt \
+    --output_dir /resnick/.../output/mirror_diffusion \
+    --split test --sampler heun --steps 40 --fp16
+```
+
+Visualizing the generated cloud-free samples from the test dataset.
+
+```bash
+cd phase2_emrdm
+python phase2_emrdm/visualize_predictions.py \\
+    --output_dir  /resnick/.../output/mirror_diffusion \\
+    --data_root   /resnick/.../data \\
+    --split       test \\
+    --n_samples   12 \\
+    --out_png     predictions_grid.png
+```
 
 ### Phase 3 — Finetune inverse map (forthcoming)
 
-Finetunes `f_psi` on actual EMRDM sampling errors to reduce distribution shift between the Gaussian noise used in Phase 1 training and the errors produced by the diffusion model.
+Finetunes `f_psi` on actual EDM sampling errors to reduce distribution shift between the Gaussian noise used in Phase 1 training and the errors produced by the diffusion model.
+
+Try training EMRDM in the mirror space.
+
+### Training EDM model without NAMM
+
+We train a EDM model without the NAMM mirror space constraints to compare how 
+the two models perform.
 
 ## Evaluation
 
 Evaluated on the SEN12MS-CR benchmark using:
 
-- **PSNR** — pixel-wise reconstruction quality
+- **MAE** (mean absolute error) — diff between predicted and ground truth
 - **SAM** (spectral angle mapper) — spectral consistency
+- **PSNR** — pixel-wise reconstruction quality
+- **SSIM** (structural similarity index) — visual and spatial similarity
 
 Results are directly comparable to published EMRDM and other SEN12MS-CR baselines.
 
